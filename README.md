@@ -13,10 +13,12 @@ Read the [setup guide](notebooks/README.md), then open:
 2. [Reproduce detector experiments](notebooks/02_reproduce_detector_experiments.ipynb):
    train and evaluate YOLOv8n/m/x with the frozen split and external dataset.
 3. [Masks and weed coordinates](notebooks/03_masks_and_weed_coordinates.ipynb):
-   inspect the pipeline, generate predictions, and optionally evaluate manual annotations.
+   inspect the algorithms and generate predictions.
+4. [Evaluate masks and coordinates](notebooks/04_evaluate_masks_and_coordinates.ipynb):
+   evaluate saved predictions against manual annotations independently.
 
 The first notebook retains its saved walkthrough outputs for reading immediately.
-All three can run in their default modes without the raw dataset or a GPU.
+All four can run in their default modes without the raw dataset or a GPU.
 Training and image processing are opt-in. Install dependencies from the provided
 requirements files rather than copying a Python virtual environment.
 
@@ -24,7 +26,6 @@ requirements files rather than copying a Python virtual environment.
 
 - `notebooks/`: notebooks, setup instructions, dependency lists, portability helpers,
   and the validation command.
-- `scripts/`: the six experiment scripts used by the notebooks.
 - `experiments/splits/`: original frozen image assignments and dataset summary.
 - `experiments/results/`: historical CSVs, configuration, environment metadata,
   detector plots, and notes. Original recorded paths describe the historical machine;
@@ -60,5 +61,22 @@ This executes the notebooks with default settings, checks frozen split portabili
 and verifies historical evidence is unchanged. OpenCV enables additional temporary
 synthetic integration checks; these are software tests, not research results.
 
-This is a plain directory prepared for importing into another repository. No new
-Git history or remote is created by this export.
+## Architecture
+
+Notebooks own the scientific implementation: dataset auditing and YOLO calls in
+notebook 2, image transformations and centroids in notebook 3, and evaluation
+formulas in notebook 4. Small functions are defined next to their explanations;
+preview and batch processing reuse the same functions. Notebooks exchange saved
+artifacts, never kernel state or code imports from another notebook.
+
+`notebooks/reproduction.py` contains only infrastructure: repository discovery,
+frozen manifest relocation, fresh run directories, environment capture, and result
+completeness checks. The six former experiment CLI scripts have been retired;
+configure and execute the corresponding notebook instead. No experiment code is
+loaded from `scripts/` or launched through a subprocess. Environment inventory
+commands (`pip freeze`, `nvidia-smi`) are the only subprocess-based support tasks.
+
+Validation exercises default notebooks, tagged scientific function cells, and
+enabled workflow cells with temporary synthetic inputs and fake model objects.
+These tests check software behavior, not detector accuracy. Real retraining still
+requires the external dataset and a suitable experiment environment.

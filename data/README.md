@@ -1,6 +1,6 @@
 # Data Directory
 
-Place the project dataset here or pass an external dataset path to the scripts.
+Place the project dataset here or set an external dataset path in the notebook configuration cells.
 Do not commit large private datasets unless publication and consent constraints
 allow it.
 

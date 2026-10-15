@@ -7,7 +7,9 @@ saved CSV files. It needs no raw images, weights, or GPU.
 Continue with [02_reproduce_detector_experiments.ipynb](02_reproduce_detector_experiments.ipynb)
 to train YOLOv8n/m/x on the frozen split, then
 [03_masks_and_weed_coordinates.ipynb](03_masks_and_weed_coordinates.ipynb)
-to inspect and run the mask/centroid pipeline. All notebooks use accessible
+to inspect and run the mask/centroid pipeline. Use
+[Evaluate masks and coordinates](04_evaluate_masks_and_coordinates.ipynb)
+to evaluate saved predictions independently against manual annotations. All notebooks use accessible
 English explanations and default to running without external experiment inputs.
 
 ## Set up Jupyter
@@ -88,7 +90,10 @@ without resampling. This is not a byte-level verification of the original images
 obtain archive checksums when available. Class ID checks cannot verify semantics:
 the user must confirm that class 0 means tobacco.
 
-Set the configuration cells before enabling `RUN_TRAINING` or `RUN_PROCESSING`.
+Set the configuration cells before enabling `RUN_TRAINING`, `RUN_PROCESSING`,
+or `RUN_EVALUATION`. Notebook 4 accepts a `PREDICTIONS` directory from an earlier
+processing run and writes evaluations to its own fresh run directory. It needs no
+detector, weights, or prior notebook kernel state.
 The mask notebook can read the new `best.pt` produced by the detector notebook.
 It can also use externally supplied historical weights without retraining.
 
@@ -98,8 +103,8 @@ New outputs go to `experiments/reproductions/<RUN_NAME>/`, which is ignored by
 Git. Each enabled experiment requires a fresh run name. To retry, change the
 name and restart the notebook; it will not silently overwrite a previous run.
 Default execution does not train, download weights, or write experiment results.
-Notebook outputs are intentionally cleared in the source files; execute them to
-see fresh tables and plots. Existing publication figures are loaded locally.
+Notebook 1 retains its historical walkthrough outputs. The experiment notebooks
+have cleared outputs; execute them to see fresh tables and plots. Existing publication figures are loaded locally.
 
 The historical settings are 50 epochs, size 1024, batch 14, SGD with learning
 rate 0.005, momentum 0.937, weight decay 0.0005, cosine scheduling, and AMP.
@@ -109,8 +114,8 @@ checksums. Results may differ with software, randomness, and hardware. For an
 out-of-memory failure, reduce batch size consistently for all detectors and
 record that deviation. CPU timing must be labeled as CPU timing.
 
-Only the detector has quantitative historical evidence. The mask notebook
-explains the current evaluators' empty-input and nearest-neighbor conventions;
+Only the detector has quantitative historical evidence. The evaluation notebook
+explains the evaluators' empty-input and nearest-neighbor conventions;
 coordinate metrics do not measure false targets, actuation, or treatment success.
 
 ## Validation for maintainers
@@ -121,8 +126,34 @@ With the analysis environment installed:
 python notebooks/validate_notebooks.py
 ```
 
-This validates notebook format, runs all three with their default settings in
+This validates notebook format, runs all four with their default settings in
 fresh kernels, checks manifest relocation and output collision handling, and
-verifies that historical results and split files remain unchanged. With OpenCV
-installed it additionally checks mask and coordinate integration using temporary
-synthetic fixtures. These fixtures test software only, never scientific results.
+verifies that historical results and split files remain unchanged. It also tests dataset auditing and training orchestration with a fake YOLO model.
+With OpenCV installed it checks image transformations, batch exports, metric edge
+cases, and enabled processing/evaluation cells using temporary synthetic fixtures. These fixtures test software only, never scientific results.
+
+
+## Maintaining the notebook implementation
+
+Scientific functions belong in the notebooks, close to their explanation and
+first use. Keep configuration, definitions, and execution cells tagged so the
+validator can exercise the same code readers see. The validator loads definition
+cells only for testing; notebooks must not dynamically load each other's code.
+No script synchronization or generated Python copy is required.
+
+Notebook 2 exposes separate cells for annotation parsing, auditing, checkpoint
+evaluation, single-model training, and comparison export. Notebook 3 shares its
+image pipeline between preview and batch output. Notebook 4 preserves the original
+metric conventions, including six-decimal rounding and nearest-neighbor matching.
+Missing predictions are errors rather than silently accepted partial evaluations.
+
+The former `scripts/*.py` command-line entry points are retired. Shared helpers
+remain limited to paths, run management, provenance, and artifact checks. When
+changing scientific behavior, update the notebook definitions and their validator
+checks together; do not create a second implementation in a helper module.
+
+During migration, dataset reports, masks, centroids, batch outputs, and evaluation
+CSVs were compared against the original scripts on temporary fixtures. The
+permanent validator retains edge-case and workflow checks without depending on
+those retired scripts. Model tests simulate training and evaluation; they do not
+claim numerical reproduction of a real YOLO run.
