@@ -43,13 +43,19 @@ and use **Restart Kernel and Run All**. Launch Jupyter from this repository;
 root discovery works from its root or a subdirectory. The notebooks have no
 hidden dependency on executing an earlier notebook in the same kernel.
 
-For actual inference/training, install a PyTorch build compatible with your GPU
-and driver first, then install the experiment requirements:
+For the tested Windows / RTX 5070 Ti setup, run inside the activated venv.
+Install requirements first, then restore the working CUDA build (the default
+installation may select CPU-only PyTorch):
 
 ```bash
 python -m pip install -r notebooks/requirements-experiments.txt
-python -c "import torch; print(torch.__version__); print(torch.cuda.is_available())"
+python -m pip uninstall -y torch torchvision
+python -m pip install torch==2.12.1 torchvision==0.27.1 --index-url https://download.pytorch.org/whl/cu132
+python -m pip check
+python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available())"
 ```
+
+Expected: `2.12.1+cu132 13.2 True`. Restart the Jupyter kernel afterward.
 
 The experiment requirements request the recorded Ultralytics version, 8.4.81.
 The other package ranges are setup constraints, not an exact environment lock.
