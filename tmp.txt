@@ -1,0 +1,6 @@
+python -c "import torch; print('Torch:', torch.__version__); print('CUDA build:', torch.version.cuda); print('GPU available:',
+  torch.cuda.is_available())"
+
+  To restore your recorded working pair, run this inside the activated venv:
+
+  python -m pip install --force-reinstall torch==2.12.1 torchvision==0.27.1 --index-url https://download.pytorch.org/whl/cu132
