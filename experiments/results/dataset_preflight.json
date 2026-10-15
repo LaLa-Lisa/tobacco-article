@@ -1,0 +1,27 @@
+{
+  "dataset": "data\\tobacco_yolo",
+  "expected_class_zero": "tobacco",
+  "images": 110,
+  "labels": 110,
+  "boxes": 4436,
+  "class_counts": {
+    "0": 4436
+  },
+  "missing_labels": [],
+  "missing_labels_count": 0,
+  "extra_label_files": [],
+  "extra_label_files_count": 0,
+  "malformed_rows": [],
+  "malformed_rows_count": 0,
+  "likely_frame_prefixes": {
+    "296279db__191133f1-scr_163": 1,
+    "49a6e08c__fc3e3605-scr_134": 1,
+    "b06df72a__29f65074-scr_133": 1,
+    "b683303d__101e26e3-scr_171": 1,
+    "d896ef88__31aa0603-scr_134": 1
+  },
+  "group_regex": null,
+  "group_regex_matches": {},
+  "status": "ok",
+  "failures": []
+}

@@ -1,0 +1,17 @@
+# Local Python environments and caches
+.venv*/
+venv/
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# External inputs and generated experiments
+*.pt
+data/*
+!data/README.md
+experiments/reproductions/
+experiments/.matplotlib/
+experiments/.ultralytics/
+experiments/results/masks/*
+!experiments/results/masks/mask_config.json
+experiments/results/yolo/yolov8*/

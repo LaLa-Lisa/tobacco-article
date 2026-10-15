@@ -1,0 +1,12 @@
+\begin{tikzpicture}
+\begin{axis}[width=\linewidth,height=0.58\linewidth,ybar,bar width=5pt,grid=both,ymin=0,ymax=1.05,ylabel={Metric},symbolic x coords={yolov8n,yolov8m,yolov8x},xtick=data,legend style={at={(0.5,-0.18)},anchor=north,legend columns=2},title={Detector comparison on frozen test split}]
+\addplot coordinates {(yolov8n,0.989332) (yolov8m,0.975432) (yolov8x,0.974448)};
+\addlegendentry{Precision}
+\addplot coordinates {(yolov8n,0.924812) (yolov8m,0.947368) (yolov8x,0.967419)};
+\addlegendentry{Recall}
+\addplot coordinates {(yolov8n,0.979108) (yolov8m,0.980780) (yolov8x,0.986217)};
+\addlegendentry{mAP@0.5}
+\addplot coordinates {(yolov8n,0.857224) (yolov8m,0.889325) (yolov8x,0.902874)};
+\addlegendentry{mAP@0.5:0.95}
+\end{axis}
+\end{tikzpicture}

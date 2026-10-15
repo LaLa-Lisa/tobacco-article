@@ -1,0 +1,17 @@
+{
+  "dataset": "data\\tobacco_yolo",
+  "class_name": "tobacco",
+  "seed": 20260627,
+  "val_fraction": 0.15,
+  "test_fraction": 0.15,
+  "images": 110,
+  "groups": 110,
+  "missing_labels": 0,
+  "boxes": 4436,
+  "split_counts": {
+    "train": 78,
+    "val": 16,
+    "test": 16
+  },
+  "manifest_sha256": "f6e061614d504ed244853b7249819a2a99affe612af9f0dc5794fa000173ec3f"
+}

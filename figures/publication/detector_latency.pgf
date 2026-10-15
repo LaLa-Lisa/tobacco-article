@@ -1,0 +1,5 @@
+\begin{tikzpicture}
+\begin{axis}[width=\linewidth,height=0.52\linewidth,ybar,bar width=14pt,grid=both,ymin=0,ylabel={Inference latency (ms/image)},symbolic x coords={yolov8n,yolov8m,yolov8x},xtick=data,title={Detector inference latency on RTX 5070 Ti}]
+\addplot coordinates {(yolov8n,1.497325) (yolov8m,6.473844) (yolov8x,17.058794)};
+\end{axis}
+\end{tikzpicture}

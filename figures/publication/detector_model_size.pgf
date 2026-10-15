@@ -1,0 +1,5 @@
+\begin{tikzpicture}
+\begin{axis}[width=\linewidth,height=0.52\linewidth,ybar,bar width=14pt,grid=both,ymin=0,ylabel={Best weights (MB)},symbolic x coords={yolov8n,yolov8m,yolov8x},xtick=data,title={Detector model size}]
+\addplot coordinates {(yolov8n,5.984000) (yolov8m,49.643000) (yolov8x,130.407000)};
+\end{axis}
+\end{tikzpicture}

@@ -1,0 +1,41 @@
+Tue Jun 30 12:42:00 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 610.62                 KMD Version: 610.62        CUDA UMD Version: 13.3     |
++-----------------------------------------+------------------------+----------------------+
+| GPU  Name                  Driver-Model | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA GeForce RTX 5070 Ti   WDDM  |   00000000:01:00.0  On |                  N/A |
+| 30%   38C    P0             49W /  300W |    1937MiB /  16303MiB |      1%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|    0   N/A  N/A            2072    C+G   ...s\Win64\EpicGamesLauncher.exe      N/A      |
+|    0   N/A  N/A            4544    C+G   ...\cef.win64\steamwebhelper.exe      N/A      |
+|    0   N/A  N/A            4920    C+G   ...s\Mozilla Firefox\firefox.exe      N/A      |
+|    0   N/A  N/A            6052    C+G   ...y\StartMenuExperienceHost.exe      N/A      |
+|    0   N/A  N/A            6232    C+G   ...s\Mozilla Firefox\firefox.exe      N/A      |
+|    0   N/A  N/A            6960    C+G   ...PN Connect\OpenVPNConnect.exe      N/A      |
+|    0   N/A  N/A            7940    C+G   ...Next\CNext\RadeonSoftware.exe      N/A      |
+|    0   N/A  N/A           10364    C+G   ...aries\Win64\EpicWebHelper.exe      N/A      |
+|    0   N/A  N/A           16944    C+G   ...yb3d8bbwe\WindowsTerminal.exe      N/A      |
+|    0   N/A  N/A           17872    C+G   ...IA App\CEF\NVIDIA Overlay.exe      N/A      |
+|    0   N/A  N/A           18424    C+G   ...2txyewy\CrossDeviceResume.exe      N/A      |
+|    0   N/A  N/A           18844    C+G   ...IA App\CEF\NVIDIA Overlay.exe      N/A      |
+|    0   N/A  N/A           19684    C+G   ..._cw5n1h2txyewy\SearchHost.exe      N/A      |
+|    0   N/A  N/A           21624    C+G   ...iles\Riot Vanguard\vgtray.exe      N/A      |
+|    0   N/A  N/A           22240    C+G   ...cord\app-1.0.9243\Discord.exe      N/A      |
+|    0   N/A  N/A           22340    C+G   ...5n1h2txyewy\TextInputHost.exe      N/A      |
+|    0   N/A  N/A           22380    C+G   ...xyewy\ShellExperienceHost.exe      N/A      |
+|    0   N/A  N/A           23744    C+G   ...indows\System32\ShellHost.exe      N/A      |
+|    0   N/A  N/A           24736    C+G   ...em_tray\lghub_system_tray.exe      N/A      |
+|    0   N/A  N/A           26516    C+G   C:\Windows\explorer.exe               N/A      |
+|    0   N/A  N/A           26784    C+G   ...__kzh8wxbdkxb8p\DCv2\DCv2.exe      N/A      |
+|    0   N/A  N/A           28172    C+G   ....0.4022.98\msedgewebview2.exe      N/A      |
++-----------------------------------------------------------------------------------------+

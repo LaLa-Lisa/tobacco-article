@@ -1,0 +1,3 @@
+\begin{tikzpicture}
+\node[inner sep=0pt] {\includegraphics[width=\linewidth]{figures/publication/confusion_matrix_yolov8x.png}};
+\end{tikzpicture}

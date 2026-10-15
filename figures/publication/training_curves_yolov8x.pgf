@@ -1,0 +1,3 @@
+\begin{tikzpicture}
+\node[inner sep=0pt] {\includegraphics[width=\linewidth]{figures/publication/training_curves_yolov8x.png}};
+\end{tikzpicture}

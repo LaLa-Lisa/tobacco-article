@@ -1,0 +1,6 @@
+path: C:\Users\natsusa_aki\academic\academic-robot\tabacco_article\data\Data105-20250527T152912Z-1-001\Data105
+train: C:\Users\natsusa_aki\academic\academic-robot\tabacco_article\experiments\splits\train.txt
+val: C:\Users\natsusa_aki\academic\academic-robot\tabacco_article\experiments\splits\val.txt
+test: C:\Users\natsusa_aki\academic\academic-robot\tabacco_article\experiments\splits\test.txt
+names:
+  0: tobacco

@@ -1,0 +1,16 @@
+data\tobacco_yolo\images\00fb0c1d-23.jpg
+data\tobacco_yolo\images\21b5097c-6.jpg
+data\tobacco_yolo\images\45c15e72-57.jpg
+data\tobacco_yolo\images\4a545406-49.jpg
+data\tobacco_yolo\images\6d64a628-42.jpg
+data\tobacco_yolo\images\6e57aa02-30.jpg
+data\tobacco_yolo\images\79d3463a-5.jpg
+data\tobacco_yolo\images\802795ae-29.jpg
+data\tobacco_yolo\images\89f98cd0-56.jpg
+data\tobacco_yolo\images\a1a5ca1e-40.jpg
+data\tobacco_yolo\images\a4a4a1a3-37.jpg
+data\tobacco_yolo\images\bc102a6d-8.jpg
+data\tobacco_yolo\images\d16fa041-21.jpg
+data\tobacco_yolo\images\e81b986f-15.jpg
+data\tobacco_yolo\images\ee32f8d9-4.jpg
+data\tobacco_yolo\images\fa16381e-20.jpg

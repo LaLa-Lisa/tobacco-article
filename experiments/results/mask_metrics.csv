@@ -1,0 +1,5 @@
+variant,images,mean_iou,mean_precision,mean_recall,mean_dice,notes
+hsv_only,0,,,,,missing or incomplete source file: experiments\results\mask_hsv_only.csv
+crop_exclusion_only,0,,,,,missing or incomplete source file: experiments\results\mask_crop_exclusion_only.csv
+hsv_crop_exclusion,0,,,,,missing or incomplete source file: experiments\results\mask_hsv_crop_exclusion.csv
+final_contour_filtering,0,,,,,missing or incomplete source file: experiments\results\mask_final_contour_filtering.csv

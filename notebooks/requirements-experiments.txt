@@ -1,0 +1,5 @@
+-r requirements-analysis.txt
+# Historical detector version. Install a GPU-compatible PyTorch build first.
+ultralytics==8.4.81
+opencv-python>=4.10,<5
+pyyaml>=6,<7

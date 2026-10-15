@@ -1,0 +1,30 @@
+{
+  "images": "data\\tobacco_yolo\\images",
+  "model": "experiments\\results\\yolo\\yolov8x\\weights\\best.pt",
+  "device": "0",
+  "conf": 0.25,
+  "imgsz": 1024,
+  "hsv": {
+    "h": [
+      35,
+      85
+    ],
+    "s": [
+      40,
+      255
+    ],
+    "v": [
+      40,
+      255
+    ]
+  },
+  "min_area": 50.0,
+  "max_area": 0.0,
+  "box_padding": 0,
+  "variants": [
+    "hsv_only",
+    "crop_exclusion_only",
+    "hsv_crop_exclusion",
+    "final_contour_filtering"
+  ]
+}
