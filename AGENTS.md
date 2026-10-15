@@ -39,7 +39,7 @@ Do not blindly apply historical Windows/CUDA installation commands on other syst
 Run the notebook validator after changes to notebook code, shared helpers, or
 scientific definitions. It executes default notebooks in fresh kernels, checks split
 portability and run collisions, and verifies historical evidence remains unchanged.
-OpenCV enables additional temporary synthetic integration checks. Report skipped
+OpenCV is part of the analysis dependencies and supports synthetic worked examples and integration checks. Report skipped
 checks or missing dependencies explicitly. Documentation-only edits need review,
 not model training.
 

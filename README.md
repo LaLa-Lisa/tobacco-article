@@ -58,8 +58,9 @@ python notebooks/validate_notebooks.py
 ```
 
 This executes the notebooks with default settings, checks frozen split portability,
-and verifies historical evidence is unchanged. OpenCV enables additional temporary
-synthetic integration checks; these are software tests, not research results.
+and verifies historical evidence is unchanged. The analysis dependencies include
+OpenCV for synthetic worked examples and integration checks. These demonstrate
+software behavior, not research results.
 
 ## Architecture
 

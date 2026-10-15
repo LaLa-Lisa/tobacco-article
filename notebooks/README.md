@@ -102,7 +102,7 @@ It can also use externally supplied historical weights without retraining.
 New outputs go to `experiments/reproductions/<RUN_NAME>/`, which is ignored by
 Git. Each enabled experiment requires a fresh run name. To retry, change the
 name and restart the notebook; it will not silently overwrite a previous run.
-Default execution does not train, download weights, or write experiment results.
+Default execution runs clearly labeled synthetic examples in memory (and temporary annotation fixtures), without training, downloading weights, or writing experiment results. OpenCV is included in the analysis installation; YOLO remains optional.
 Notebook 1 retains its historical walkthrough outputs. The experiment notebooks
 have cleared outputs; execute them to see fresh tables and plots. Existing publication figures are loaded locally.
 
@@ -129,7 +129,7 @@ python notebooks/validate_notebooks.py
 This validates notebook format, runs all four with their default settings in
 fresh kernels, checks manifest relocation and output collision handling, and
 verifies that historical results and split files remain unchanged. It also tests dataset auditing and training orchestration with a fake YOLO model.
-With OpenCV installed it checks image transformations, batch exports, metric edge
+The analysis installation includes OpenCV; validation checks image transformations, batch exports, metric edge
 cases, and enabled processing/evaluation cells using temporary synthetic fixtures. These fixtures test software only, never scientific results.
 
 
@@ -157,3 +157,32 @@ CSVs were compared against the original scripts on temporary fixtures. The
 permanent validator retains edge-case and workflow checks without depending on
 those retired scripts. Model tests simulate training and evaluation; they do not
 claim numerical reproduction of a real YOLO run.
+
+## Reading and changing an experiment
+
+Each scientific stage is explained beside its definition and a small worked example.
+Synthetic examples illustrate software behavior only; they are not article evidence.
+Notebook 2 keeps annotation inspection separate from the frozen reproduction policy.
+Its `TRAINING_OPTIONS` dictionary includes all explicitly selected training settings;
+notebook 3 uses `PROCESSING_OPTIONS` for both preview and batch output. These exact
+settings are recorded with new runs. Change these dictionaries rather than editing
+function defaults. Unspecified YOLO defaults still depend on the framework version.
+
+Initialize notebook 3 before external processing. `SHOW_PREVIEW` controls only the
+preview; batch generation does not depend on executing that cell. Fresh output
+checks also reject rerunning training into an existing model-comparison directory.
+Training, validation and test each have a status; the overall status is successful
+only when all three succeed. Existing historical tables remain readable.
+
+Evaluation keeps metrics numeric until CSV export. Per-image values are exported
+to six decimals and mask summaries preserve the mean of those rounded values.
+Coordinate CSVs require finite numeric `x,y` values; header-only files represent
+empty annotations. Missing files, duplicate image/mask stems, and malformed rows
+are errors. Mask discovery accepts all documented image extensions irrespective
+of extension case. Evaluation is independently runnable on saved predictions.
+
+The validator exercises multiple images, stage failures, checkpoint fallback,
+malformed inputs, optional-preview independence, and output collisions. Default
+execution runs in fresh kernels; enabled workflows use simulated models, never
+real training. Keep `setup`, `configuration`, `definitions`, `execution`, `preview`,
+and `example` tags aligned with each cell's responsibility.

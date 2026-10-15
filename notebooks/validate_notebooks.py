@@ -2,7 +2,6 @@
 """Execute default notebooks and check portability/integration without real data."""
 import csv
 import hashlib
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -71,6 +70,17 @@ def notebook_definitions(filename):
     return namespace
 
 
+def configuration(filename):
+    """Execute the reader's configuration cell, without importing model dependencies."""
+    namespace = dict(ROOT=ROOT, RESULTS=ROOT / 'experiments/results', Path=Path,
+                     pd=__import__('pandas'), json=json, display=lambda *args: None)
+    notebook = json.loads((ROOT / 'notebooks' / filename).read_text())
+    for cell in notebook['cells']:
+        if 'configuration' in cell['metadata'].get('tags', []):
+            exec(''.join(cell['source']), namespace)
+    return namespace
+
+
 def must_raise(error, function, *args, **kwargs):
     try:
         function(*args, **kwargs)
@@ -88,13 +98,15 @@ def check_detector(temp):
     (dataset / 'images/a.jpg').touch()
     label = dataset / 'labels/a.txt'
     label.write_text('0 0.5 0.5 0.2 0.2\n')
-    report = d['audit_dataset'](dataset, temp / 'audit.json')
+    report = d['audit_dataset'](dataset)
     assert report['status'] == 'ok' and report['boxes'] == 1
     label.write_text('0 2 0.5 0.2 0.2\ninvalid\n')
-    assert d['audit_dataset'](dataset, temp / 'audit.json')['status'] == 'fail'
+    assert d['audit_dataset'](dataset)['status'] == 'fail'
     label.unlink()
-    assert d['audit_dataset'](dataset, temp / 'audit.json')['missing_labels_count'] == 1
-    assert d['audit_dataset'](temp / 'absent', temp / 'absent.json')['status'] == 'fail'
+    assert d['audit_dataset'](dataset)['missing_labels_count'] == 1
+    assert d['audit_dataset'](temp / 'absent')['status'] == 'fail'
+    options = configuration('02_reproduce_detector_experiments.ipynb')['TRAINING_OPTIONS']
+    options.update(epochs=1, imgsz=32, batch=1, device='cpu')
     calls = []
 
     class FakeYOLO:
@@ -112,45 +124,53 @@ def check_detector(temp):
                 raise RuntimeError('Training fixture failure')
             run = Path(kwargs['project']) / kwargs['name']
             (run / 'weights').mkdir(parents=True)
-            (run / 'weights/last.pt').write_bytes(b'last')
-            if self.source != 'fallback.pt':
+            if self.source != 'missing.pt':
+                (run / 'weights/last.pt').write_bytes(b'last')
+            if self.source not in ('fallback.pt', 'missing.pt'):
                 (run / 'weights/best.pt').write_bytes(b'best')
             (run / 'results.csv').write_text('epoch,metrics/mAP50-95(B)\n1,0.4\n')
             return SimpleNamespace(results_dict={}, speed={})
 
         def val(self, **kwargs):
             calls.append(('val', kwargs))
-            if 'eval-failure' in self.source and kwargs['split'] == 'test':
+            if ('eval-failure' in self.source and kwargs['split'] == 'test'
+                    or 'val-failure' in self.source and kwargs['split'] == 'val'):
                 raise RuntimeError('Evaluation fixture failure')
             return SimpleNamespace(results_dict={'metrics/mAP50-95(B)': 0.5}, speed={'inference': 1})
 
     output = temp / 'fake training'
-    models = ['good.pt', 'fallback.pt', 'broken.pt', 'eval-failure.pt']
+    models = ['good.pt', 'fallback.pt', 'broken.pt', 'eval-failure.pt', 'val-failure.pt', 'missing.pt']
     rows = d['train_detectors'](dataset, temp / 'splits', models, output,
-                                epochs=1, imgsz=32, batch=1, device='cpu', model_factory=FakeYOLO)
-    assert [r['status'] for r in rows] == ['ok', 'ok', 'failed', 'ok']
-    assert rows[-1]['test_status'] == 'failed'
+                                options=options, model_factory=FakeYOLO)
+    assert [r['status'] for r in rows] == ['ok', 'ok', 'failed', 'failed', 'failed', 'failed']
+    assert rows[3]['test_status'] == 'failed' and rows[3]['train_status'] == 'ok'
+    assert rows[4]['val_status'] == 'failed' and rows[4]['test_status'] == 'ok'
+    assert rows[5]['val_status'] == rows[5]['test_status'] == 'failed'
     assert any(kind == 'load' and str(value).endswith('fallback/weights/last.pt') for kind, value in calls)
     assert any(kind == 'load' and str(value).endswith('good/weights/best.pt') for kind, value in calls)
-    assert len([1 for kind, _ in calls if kind == 'val']) == 6
+    assert len([1 for kind, _ in calls if kind == 'val']) == 8
     assert (output / 'good_results.csv').is_file()
     must_raise(RuntimeError, check_detector_results, output / 'model_comparison.csv')
     success = temp / 'fake success'
     d['train_detectors'](dataset, temp / 'splits', ['good.pt'], success,
-                         epochs=1, device='cpu', model_factory=FakeYOLO)
+                         options=options, model_factory=FakeYOLO)
     check_detector_results(success / 'model_comparison.csv')
+    metadata = json.loads((success / 'run_metadata.json').read_text())
+    assert all(metadata[key] == value for key, value in options.items())
+    must_raise(FileExistsError, d['train_detectors'], dataset, temp / 'splits', ['good.pt'],
+               success, options=options, model_factory=FakeYOLO)
     print('PASS: notebook dataset audits, YOLO arguments, checkpoints, exports and failure handling')
 
 
 def check_processing(temp):
-    if importlib.util.find_spec('cv2') is None:
-        print('SKIP: synthetic mask/coordinate checks require OpenCV.')
-        return
     import cv2
     import numpy as np
     from types import SimpleNamespace
     masks = notebook_definitions('03_masks_and_weed_coordinates.ipynb')
     scores = notebook_definitions('04_evaluate_masks_and_coordinates.ipynb')
+    options = configuration('03_masks_and_weed_coordinates.ipynb')['PROCESSING_OPTIONS']
+    options['device'] = 'cpu'
+    crop_options = {key: options[key] for key in ('conf', 'imgsz', 'device', 'box_padding')}
     images, truth, points = (temp / name for name in ('images', 'truth', 'points'))
     for folder in (images, truth, points):
         folder.mkdir()
@@ -176,12 +196,13 @@ def check_processing(temp):
         def numpy(self):
             return np.array([[-3.2, -1.2, 15.4, 50.0]])
     detector = SimpleNamespace(predict=lambda **kwargs: [SimpleNamespace(boxes=SimpleNamespace(xyxy=Boxes()))])
-    crop = masks['crop_mask'](detector, path, (40, 40), device='cpu')
+    crop = masks['crop_mask'](detector, path, (40, 40), **crop_options)
     assert np.all(crop[:, :16] == 255) and np.all(crop[:, 16:] == 0)
-    assert not masks['crop_mask'](None, path, (40, 40)).any()
+    assert not masks['crop_mask'](None, path, (40, 40), **crop_options).any()
     # Actual batch and evaluation functions from the notebooks, with synthetic data only.
-    masks['generate_predictions'](images, detector, temp / 'masks', device='cpu')
-    _, _, expected, expected_centers = masks['process_image'](path, detector, device='cpu')
+    masks['generate_predictions'](images, detector, temp / 'masks', model_path=Path('fixture.pt'), **options)
+    result = masks['process_image'](path, detector, **options)
+    expected, expected_centers = result['variants'], result['centers']
     for name, array in expected.items():
         assert np.array_equal(cv2.imread(str(temp / 'masks' / name / 'fixture.png'), 0), array)
     cv2.imwrite(str(truth / 'fixture.png'), expected['final_contour_filtering'])
@@ -198,7 +219,7 @@ def check_processing(temp):
     assert scores['hit_rate']([], 10) == 1
     (temp / 'masks/centers/fixture.csv').write_text('x,y\n')
     rows = scores['evaluate_coordinates'](points, temp / 'masks/centers', temp / 'empty-centers.csv')
-    assert rows[0]['mean_nearest_error_px'] == 'inf' and float(rows[0]['hit_rate_10px']) == 0
+    assert rows[0]['mean_nearest_error_px'] == float('inf') and float(rows[0]['hit_rate_10px']) == 0
     (temp / 'masks/centers/fixture.csv').unlink()
     must_raise(FileNotFoundError, scores['evaluate_coordinates'], points, temp / 'masks/centers', temp / 'missing.csv')
     cv2.imwrite(str(truth / 'missing.png'), final)
@@ -206,10 +227,55 @@ def check_processing(temp):
     print('PASS: notebook image pipeline, batch exports, mask and coordinate edge cases')
 
 
-def execution_cells(filename, namespace):
+def check_evaluation_regressions(temp):
+    import cv2
+    import numpy as np
+    d = notebook_definitions('04_evaluate_masks_and_coordinates.ipynb')
+    m = notebook_definitions('03_masks_and_weed_coordinates.ipynb')
+    truth, pred = temp / 'regression-truth', temp / 'regression-pred'
+    truth.mkdir(); pred.mkdir()
+    for name, actual, predicted in [('a', '0,0', '3,4'), ('b', '10,10', '10,10')]:
+        (truth / f'{name}.csv').write_text('x,y\n' + actual + '\n')
+        (pred / f'{name}.csv').write_text('x,y\n' + predicted + '\n')
+    rows = d['evaluate_coordinates'](truth, pred, temp / 'regression.csv')
+    assert [row['mean_nearest_error_px'] for row in rows] == [5.0, 0.0]
+    bad = temp / 'bad.csv'
+    for content in ['u,v\n1,2\n', 'x,y\n1,\n', 'x,y\nnan,2\n', 'x,y\n1,inf\n']:
+        bad.write_text(content)
+        must_raise(ValueError, d['read_points'], bad)
+    bad.write_text('x,y\n')
+    assert d['read_points'](bad) == []
+    mask = np.ones((8, 8), dtype=np.uint8) * 255
+    cv2.imwrite(str(truth / 'a.TIF'), mask)
+    cv2.imwrite(str(pred / 'a.PNG'), mask)
+    assert set(d['find_masks'](truth)) == {'a'}
+    rows = d['evaluate_masks'](truth, pred, temp / 'formats.csv')
+    assert rows[-1]['iou'] == 1
+    cv2.imwrite(str(truth / 'a.png'), mask)
+    must_raise(ValueError, d['find_masks'], truth)
+    must_raise(ValueError, m['list_images'], truth)
+    detector = notebook_definitions('02_reproduce_detector_experiments.ipynb')
+    must_raise(ValueError, detector['image_paths'], truth)
+    # Existing six-decimal output remains explicit at the serialization boundary.
+    assert d['format_metric_row']({'iou': 1 / 3, 'tp': 2}) == {'iou': '0.333333', 'tp': 2}
+    rounded_truth, rounded_pred = temp / 'rounded-truth', temp / 'rounded-pred'
+    rounded_truth.mkdir(); rounded_pred.mkdir()
+    for name, total, positive in [('one', 3, 1), ('two', 7, 2)]:
+        gt = np.full((1, total), 255, dtype=np.uint8)
+        pr = np.zeros_like(gt); pr[:, :positive] = 255
+        cv2.imwrite(str(rounded_truth / f'{name}.png'), gt)
+        cv2.imwrite(str(rounded_pred / f'{name}.png'), pr)
+    rows = d['evaluate_masks'](rounded_truth, rounded_pred, temp / 'rounded.csv')
+    expected_mean = (float(f'{1/3:.6f}') + float(f'{2/7:.6f}')) / 2
+    assert rows[-1]['iou'] == expected_mean
+    assert rows[-1]['iou'] != 3 / 10
+    print('PASS: multiple coordinate files, mask extensions, duplicate stems and malformed annotations')
+
+
+def execution_cells(filename, namespace, tag='execution'):
     notebook = json.loads((ROOT / 'notebooks' / filename).read_text())
     for cell in notebook['cells']:
-        if cell['cell_type'] == 'code' and 'execution' in cell['metadata'].get('tags', []):
+        if cell['cell_type'] == 'code' and tag in cell['metadata'].get('tags', []):
             exec(compile(''.join(cell['source']), filename, 'exec'), namespace)
 
 
@@ -235,7 +301,8 @@ def check_enabled_workflows(temp):
     common = dict(ROOT=ROOT, pd=pd, plt=plt, display=lambda *args: None,
                   new_run=lambda root, name: new_run(workflow, name),
                   capture_environment=lambda path: captures.append(path),
-                  write_local_splits=write_local_splits, check_detector_results=check_detector_results)
+                  write_local_splits=write_local_splits, check_detector_results=check_detector_results,
+                  frozen_assignments=frozen_assignments)
     train = notebook_definitions('02_reproduce_detector_experiments.ipynb')
     train.update(common)
     class Model:
@@ -249,17 +316,16 @@ def check_enabled_workflows(temp):
             return SimpleNamespace(results_dict={}, speed={})
         def val(self, **kwargs):
             return SimpleNamespace(results_dict={'metrics/mAP50-95(B)': .5}, speed={})
+    train.update(configuration('02_reproduce_detector_experiments.ipynb'))
+    train['TRAINING_OPTIONS'].update(epochs=1, imgsz=32, batch=1, device='cpu')
     train.update(RUN_TRAINING=True, CLASS_ZERO_CONFIRMED_TOBACCO=True,
-                 DATASET=dataset, RUN_NAME='detector', DEVICE='cpu', MODELS=['fixture.pt'],
-                 EPOCHS=1, IMAGE_SIZE=32, BATCH_SIZE=1, run_dir=None, training_complete=False)
+                 DATASET=dataset, RUN_NAME='detector', MODELS=['fixture.pt'])
     with patch.dict(sys.modules, {'torch': SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False)),
                                   'ultralytics': SimpleNamespace(YOLO=Model)}):
         execution_cells('02_reproduce_detector_experiments.ipynb', train)
     assert train['training_complete']
+    assert all(row['status'] == 'ok' for row in train['comparison_rows'])
     assert (train['run_dir'] / 'yolo/model_comparison.csv').is_file()
-    if importlib.util.find_spec('cv2') is None:
-        print('SKIP: enabled processing/evaluation workflows require OpenCV.')
-        return
     import cv2
     import numpy as np
     images = workflow / 'images'
@@ -267,20 +333,28 @@ def check_enabled_workflows(temp):
     image = np.zeros((40, 40, 3), dtype=np.uint8)
     image[10:30, 10:30] = (0,255,0)
     cv2.imwrite(str(images / 'fixture.png'), image)
+    cv2.imwrite(str(images / 'second.png'), image)
     masks = notebook_definitions('03_masks_and_weed_coordinates.ipynb')
     masks.update(common)
     detector = SimpleNamespace(names={0: 'tobacco'}, predict=lambda **kwargs: [])
-    masks.update(RUN_PROCESSING=True, IMAGES=images,
+    masks.update(configuration('03_masks_and_weed_coordinates.ipynb'))
+    masks['PROCESSING_OPTIONS'].update(imgsz=32, device='cpu')
+    masks.update(RUN_PROCESSING=True, SHOW_PREVIEW=False, IMAGES=images,
                  WEIGHTS=train['run_dir'] / 'yolo/fixture/weights/best.pt',
-                 RUN_NAME='processing', DEVICE='cpu', CONFIDENCE=.25, IMAGE_SIZE=32,
-                 HSV_LOWER=(35,40,40), HSV_UPPER=(85,255,255), MIN_AREA=50,
-                 MAX_AREA=0, BOX_PADDING=0, load_detector=lambda path: detector)
+                 RUN_NAME='processing', load_detector=lambda path: detector)
     execution_cells('03_masks_and_weed_coordinates.ipynb', masks)
     assert masks['processing_complete']
+    # The batch above ran without any preview cell or synthetic example state.
+    masks['SHOW_PREVIEW'] = True
+    execution_cells('03_masks_and_weed_coordinates.ipynb', masks, tag='preview')
+    must_raise(FileExistsError, execution_cells, '03_masks_and_weed_coordinates.ipynb', masks)
+    assert not masks['processing_complete']
     truth, centers = workflow / 'truth', workflow / 'centers'
     truth.mkdir(); centers.mkdir()
-    cv2.imwrite(str(truth / 'fixture.png'), masks['hsv_mask'](image))
+    cv2.imwrite(str(truth / 'fixture.TIF'), masks['hsv_mask'](image))
     (centers / 'fixture.csv').write_text('x,y\n19,19\n')
+    cv2.imwrite(str(truth / 'second.TIF'), masks['hsv_mask'](image))
+    (centers / 'second.csv').write_text('x,y\n22,23\n')
     evaluation = notebook_definitions('04_evaluate_masks_and_coordinates.ipynb')
     evaluation.update(common)
     evaluation.update(RUN_EVALUATION=True, PREDICTIONS=masks['mask_run'] / 'masks',
@@ -289,6 +363,9 @@ def check_enabled_workflows(temp):
     execution_cells('04_evaluate_masks_and_coordinates.ipynb', evaluation)
     assert (evaluation['evaluation_run'] / 'mask_metrics.csv').is_file()
     assert (evaluation['evaluation_run'] / 'coordinate_metrics.csv').is_file()
+    with (evaluation['evaluation_run'] / 'coordinate_metrics.csv').open() as handle:
+        measured = list(csv.DictReader(handle))
+    assert [float(row['mean_nearest_error_px']) for row in measured] == [0.0, 5.0]
     assert len(captures) == 3
     plt.close('all')
     print('PASS: enabled training, processing and independent evaluation notebook cells')
@@ -324,6 +401,7 @@ def main():
         check_helpers(temp)
         check_detector(temp)
         check_processing(temp)
+        check_evaluation_regressions(temp)
         check_enabled_workflows(temp)
     assert before == evidence_hashes(), 'Historical evidence changed during validation!'
     print('PASS: historical results and manifests unchanged')
