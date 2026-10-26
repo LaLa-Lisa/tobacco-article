@@ -15,3 +15,5 @@ experiments/.ultralytics/
 experiments/results/masks/*
 !experiments/results/masks/mask_config.json
 experiments/results/yolo/yolov8*/
+
+*.pdf
