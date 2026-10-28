@@ -17,3 +17,4 @@ experiments/results/masks/*
 experiments/results/yolo/yolov8*/
 
 *.pdf
+runs/
