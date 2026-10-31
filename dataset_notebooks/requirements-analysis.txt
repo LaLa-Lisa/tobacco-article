@@ -1,0 +1,13 @@
+# CPU audit, annotation editor, evaluation, and notebook validation (Python 3.11+).
+nbformat>=5.10,<6
+nbclient>=0.10,<1
+ipykernel>=6.29,<8
+jupyterlab>=4.3,<5
+numpy>=1.26,<3
+Pillow>=10,<14
+matplotlib>=3.8,<4
+opencv-python>=4.9,<5
+scipy>=1.12,<2
+ipywidgets>=8.1,<9
+ipycanvas>=0.14,<0.15
+pycocotools>=2.0.10,<3

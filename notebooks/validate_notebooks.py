@@ -386,14 +386,22 @@ def main():
         from nbclient import NotebookClient
         import nbformat
         install(prefix=str(temp), kernel_name='tobacco-validation')
-        for path in sorted((ROOT / 'notebooks').glob('*.ipynb')):
+        # Validate the four reproduction workflows, not exploratory notebooks
+        # such as sam.ipynb, which have their own environment and execution flags.
+        workflow_names = (
+            '01_understand_existing_results.ipynb',
+            '02_reproduce_detector_experiments.ipynb',
+            '03_masks_and_weed_coordinates.ipynb',
+            '04_evaluate_masks_and_coordinates.ipynb',
+        )
+        for name in workflow_names:
+            path = ROOT / 'notebooks' / name
             notebook = nbformat.read(path, as_version=4)
             nbformat.validate(notebook)
             for cell in notebook.cells:
                 if cell.cell_type == 'code':
                     assert 'run_script(' not in cell.source
                     assert "ROOT / 'scripts'" not in cell.source
-            assert len(list((ROOT / 'notebooks').glob('*.ipynb'))) == 4
             client = NotebookClient(notebook, timeout=180, kernel_name='tobacco-validation',
                                     resources={'metadata': {'path': str(ROOT / 'notebooks')}})
             client.execute()
