@@ -17,6 +17,12 @@ image may produce multiple training samples. Selection uses `SEED`, and validati
 stays unchanged. `None` (default) uses all training images. Limits larger than
 the available count use all images; the chosen limit is recorded in `config.json`.
 
+Set `SAVE_EVERY_N_EPOCHS = 5` to retain `epoch_005.pt`, `epoch_010.pt`, etc.
+Use `1` to save every epoch, or any positive integer such as `2` or `10`.
+These numbered checkpoints use the same format and atomic saving as `best.pt`
+and `last.pt`; point notebook 2 at any of them to compare results. `last.pt` still
+updates every epoch, including a final epoch outside the chosen interval.
+
 No prior audit, annotation editor, exported dataset, or smoke report is needed.
 Neither notebook depends on `dataset_notebooks/`. Launch Jupyter inside this
 repository; the only shared helper is the existing fresh-run directory utility.
