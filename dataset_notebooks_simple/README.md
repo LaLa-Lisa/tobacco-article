@@ -11,6 +11,12 @@ Two notebooks, using your existing V2 images/masks and local original `sam3.pt`:
    original image, dataset labels, and trained SAM 3. Change `EXAMPLE_IMAGES`
    or `CONFIDENCE` to inspect other results; use a new `RUN_NAME` when saving again.
 
+For a smaller training run, set `MAX_TRAIN_IMAGES = 200` in notebook 1. The
+limit counts unique source images before dense-patch cropping; each selected
+image may produce multiple training samples. Selection uses `SEED`, and validation
+stays unchanged. `None` (default) uses all training images. Limits larger than
+the available count use all images; the chosen limit is recorded in `config.json`.
+
 No prior audit, annotation editor, exported dataset, or smoke report is needed.
 Neither notebook depends on `dataset_notebooks/`. Launch Jupyter inside this
 repository; the only shared helper is the existing fresh-run directory utility.
@@ -66,6 +72,14 @@ Training may take a long time on the GPU. Epoch progress and timings appear in
 the notebook. The checkpoints contain model weights and training settings;
 `last.pt` is usable for inference but does not contain optimizer-resume state.
 Use a fresh run name for a new attempt. Outputs are ignored by Git.
+
+Checkpoint saves write a temporary file first and replace `best.pt`/`last.pt`
+only when writing finishes. If an older checkpoint reports “failed finding
+central directory”, wait for any saving/copying to finish or recopy a complete
+file. If `best.pt` remains damaged, set notebook 2's `CHECKPOINT` to that run's
+`last.pt`. This evaluates the last saved epoch, which may differ from the best
+validation epoch. If neither file is readable, a complete backup or a new training
+run is needed; the loader cannot reconstruct an incomplete archive.
 
 CPU checks validate notebook execution, connected-region targets, and comparison
 rendering. They do not establish GPU compatibility or segmentation accuracy.
