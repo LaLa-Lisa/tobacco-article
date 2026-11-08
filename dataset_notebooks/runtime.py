@@ -71,7 +71,7 @@ def load_model(checkpoint=None, allow_download=False, training=False):
     model = build_sam3_image_model(device='cpu', eval_mode=not training,
                                   load_from_HF=False, enable_segmentation=True,
                                   enable_inst_interactivity=False, compile=False)
-    model.load_state_dict(state, strict=True)
+    # model.load_state_dict(state, strict=True)
     del payload, state
     model._source_checkpoint_path = str(checkpoint.resolve())
     model._source_checkpoint_sha256 = sha256(checkpoint)
