@@ -30,21 +30,21 @@ def train_models(dataset: DatasetSpec, config: TrainConfig | None = None) -> Tra
         reason = spec.unavailable_reason("train")
         if reason:
             batch.skipped[spec.id] = reason
-            print(f"Пропущено {spec.id}: {reason}")
+            print(f"Skipped {spec.id}: {reason}")
             continue
         try:
             inspect_dataset(dataset, spec.task)  # Проверяем совместимость разметки до скачивания весов.
             backend = get_backend(spec)
             initial = backend.download(spec)
             batch.runs[spec.id] = backend.train(spec, initial, dataset, config)
-            print(f"Завершено {spec.id}: {batch.runs[spec.id].directory}")
+            print(f"Completed {spec.id}: {batch.runs[spec.id].directory}")
         except UnsupportedOperation as exc:
             batch.skipped[spec.id] = str(exc)
-            print(f"Пропущено {spec.id}: {exc}")
+            print(f"Skipped {spec.id}: {exc}")
         except Exception as exc:
-            raise RuntimeError(f"Ошибка обучения {spec.id}: {exc}") from exc
+            raise RuntimeError(f"Training failed for {spec.id}: {exc}") from exc
     if not batch.runs:
-        print("Ни один запуск обучения не завершён. Проверьте MODELS и причины пропуска.")
+        print("No training runs completed. Check MODELS and the reported skip reasons.")
     return batch
 
 

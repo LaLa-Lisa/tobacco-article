@@ -67,7 +67,7 @@ class ModelsTest(unittest.TestCase):
         self.selection("yolov8", "rtmdet", "pidnet")
         rows = weight.weight_status()
         self.assertEqual(len(rows), 3)
-        self.assertTrue(all(row["status"] != "Готово" for row in rows))
+        self.assertTrue(all(row["status"] != "Ready" for row in rows))
 
     def test_download_reuses_file_without_provider(self):
         cmn.ORIGINAL_WEIGHTS_DIR.mkdir()
@@ -113,8 +113,8 @@ class ModelsTest(unittest.TestCase):
             with self.assertRaises(OSError):
                 weight.download_weights()
         table = display.update.call_args.args[0]
-        self.assertEqual(table.loc["yolov8n", "Статус"], "Ошибка")
-        self.assertEqual(table.loc["yolo26n", "Статус"], "Не запускалось")
+        self.assertEqual(table.loc["yolov8n", "status"], "Failed")
+        self.assertEqual(table.loc["yolo26n", "status"], "Not attempted")
 
     def test_download_preserves_return_paths_api(self):
         self.selection("yolov8n")
@@ -135,7 +135,7 @@ class ModelsTest(unittest.TestCase):
 
     def test_training_checkpoint_task_mismatch(self):
         with patch("scripts.backends.ultralytics._construct", return_value=SimpleNamespace(task="segment")):
-            with self.assertRaisesRegex(ValueError, "Задача файла весов"):
+            with self.assertRaisesRegex(ValueError, "Checkpoint task"):
                 self.backend.train(self.spec, self.artifacts, self.dataset(), TrainConfig())
 
     def test_dataset_task_and_annotation_validation(self):

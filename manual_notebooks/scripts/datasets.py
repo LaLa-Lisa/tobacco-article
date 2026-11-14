@@ -12,21 +12,21 @@ def inspect_dataset(dataset: DatasetSpec, task: str) -> dict:
     import yaml
 
     if dataset.task != task or task not in {"detect", "segment"}:
-        raise ValueError(f"Задача датасета {dataset.task!r} не соответствует задаче модели {task!r}")
+        raise ValueError(f"Dataset task {dataset.task!r} does not match model task {task!r}")
     path = Path(dataset.yaml).resolve()
     raw = path.read_bytes()
     data = yaml.safe_load(raw)
     if not isinstance(data, dict) or not data.get("names"):
-        raise ValueError(f"{path}: ожидается YAML датасета YOLO с названиями классов")
+        raise ValueError(f"{path}: expected YOLO YAML with class names")
     names = data["names"]
     if isinstance(names, list):
         class_ids = set(range(len(names)))
     elif isinstance(names, dict):
         class_ids = set(names)
         if class_ids != set(range(len(names))):
-            raise ValueError("Идентификаторы классов должны быть последовательными целыми числами начиная с нуля")
+            raise ValueError("Dataset class IDs must be contiguous integers starting at zero")
     else:
-        raise ValueError("Поле names должно содержать список или словарь с целочисленными ключами")
+        raise ValueError("Dataset names must be a list or integer-keyed mapping")
     root = Path(data.get("path") or path.parent)
     # Как в Ultralytics: существующий относительный путь считается от рабочего каталога;
     # иначе — от настроенного каталога датасетов.
@@ -40,7 +40,7 @@ def inspect_dataset(dataset: DatasetSpec, task: str) -> dict:
         if not value:
             if split == "test":
                 continue
-            raise ValueError(f"В датасете не задана выборка {split!r}")
+            raise ValueError(f"Dataset is missing {split!r}")
         sources = value if isinstance(value, list) else [value]
         images = []
         for source in sources:
@@ -61,10 +61,10 @@ def inspect_dataset(dataset: DatasetSpec, task: str) -> dict:
                     if image.suffix.lower() in IMAGE_SUFFIXES:
                         images.append(image.resolve())
             else:
-                raise ValueError(f"Ожидается каталог изображений или файл выборки .txt: {source}")
+                raise ValueError(f"Expected an image directory or split .txt file: {source}")
         images.sort()
         if not images:
-            raise ValueError(f"Выборка {split} пуста")
+            raise ValueError(f"Empty {split} split")
         digest = hashlib.sha256()
         annotation_count = 0
         for image in images:
@@ -72,7 +72,7 @@ def inspect_dataset(dataset: DatasetSpec, task: str) -> dict:
                 raise FileNotFoundError(image)
             parts = list(image.parts)
             if "images" not in parts:
-                raise ValueError(f"Путь к изображению YOLO должен содержать каталог images: {image}")
+                raise ValueError(f"YOLO image path must contain an images directory: {image}")
             index = len(parts) - 1 - parts[::-1].index("images")
             parts[index] = "labels"
             label = Path(*parts).with_suffix(".txt")
@@ -85,10 +85,10 @@ def inspect_dataset(dataset: DatasetSpec, task: str) -> dict:
                 valid_shape = len(fields) == 5 if task == "detect" else len(fields) >= 7 and len(fields) % 2 == 1
                 if (not valid_shape or not all(math.isfinite(v) for v in fields)
                         or fields[0] not in class_ids or any(v < 0 or v > 1 for v in fields[1:])):
-                    raise ValueError(f"Некорректная разметка {task} в {label}: {line}")
+                    raise ValueError(f"Invalid {task} annotation in {label}: {line}")
                 annotation_count += 1
         if split == "train" and not annotation_count:
-            raise ValueError("В обучающей выборке нет разметки")
+            raise ValueError("Training split has no annotations")
         result["splits"][split] = {"images": len(images), "annotations": annotation_count,
                                     "paths_and_labels_sha256": digest.hexdigest()}
     return result

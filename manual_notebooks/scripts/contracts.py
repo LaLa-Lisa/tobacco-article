@@ -20,11 +20,11 @@ class ModelSpec:
 
     def unavailable_reason(self, operation: str) -> str | None:
         if self.backend != "ultralytics":
-            return self.note or f"Бэкенд {self.backend!r} пока не реализован"
+            return self.note or f"Backend {self.backend!r} is not implemented"
         if not self.checkpoint:
-            return "Укажите конкретный вариант и файл весов в MODELS_REGESTRY"
+            return "Requires a concrete variant/checkpoint in MODELS_REGESTRY"
         if operation not in self.operations:
-            return f"Операция {operation} не поддерживается этой интеграцией"
+            return f"{operation} is not supported by this integration"
         return None
 
 

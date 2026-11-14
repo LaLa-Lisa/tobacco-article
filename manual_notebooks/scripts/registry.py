@@ -46,31 +46,31 @@ for name, checkpoint, task, constructor, operations in [
     MODELS_REGESTRY[name] = ModelSpec(name, "ultralytics", task, constructor, checkpoint, operations)
 
 _add("rtmdet rtmdet-x faster-rcnn", backend="mmdetection", constructor=None,
-     operations=frozenset(), note="Отключено: бэкенд mmdetection запланирован, но пока не реализован")
+     operations=frozenset(), note="Disabled: future mmdetection backend is not implemented")
 _add("rtmdet-ins", backend="mmdetection", task="segment", constructor=None,
-     operations=frozenset(), note="Отключено: бэкенд mmdetection запланирован, но пока не реализован")
+     operations=frozenset(), note="Disabled: future mmdetection backend is not implemented")
 _add("rf-detr rf-detr-m", backend="rfdetr", constructor=None,
-     operations=frozenset(), note="Отключено: бэкенд rfdetr запланирован, но пока не реализован")
+     operations=frozenset(), note="Disabled: future rfdetr backend is not implemented")
 _add("rf-detr-seg", backend="rfdetr", task="segment", constructor=None,
-     operations=frozenset(), note="Отключено: бэкенд rfdetr запланирован, но пока не реализован")
+     operations=frozenset(), note="Disabled: future rfdetr backend is not implemented")
 _add("yolov5 yolov6 yolov7 damo-yolo yolov13 rt-detrv2 rt-detrv2-s d-fine deim deimv2 rt-detrv4 tia-yolov5 yoloc-tiny",
      backend=None, constructor=None, operations=frozenset(),
-     note="Отключено: нужна реализация вне трёх запланированных бэкендов")
+     note="Disabled: requires an implementation outside the three planned backends")
 _add("pidnet pidnet-s efficientvit weedsense", backend=None, constructor=None,
-     task="semantic", operations=frozenset(), note="Отключено: этот бэкенд не входит в текущий план")
+     task="semantic", operations=frozenset(), note="Disabled: backend outside scope")
 _add("efficientvit-sam", backend=None, constructor=None, task="prompt_segment",
-     operations=frozenset(), note="Отключено: этот бэкенд не входит в текущий план")
+     operations=frozenset(), note="Disabled: backend outside scope")
 
 
 def validate_registry(models, registry=None):
     registry = MODELS_REGESTRY if registry is None else registry
     if models.keys() != registry.keys():
-        raise ValueError(f"Несоответствие MODELS и реестра: отсутствуют={set(models) - set(registry)}, "
-                         f"лишние={set(registry) - set(models)}")
+        raise ValueError(f"MODELS/registry mismatch: missing={set(models) - set(registry)}, "
+                         f"extra={set(registry) - set(models)}")
     for name, enabled in models.items():
         if type(enabled) is not bool or registry[name].id != name:
-            raise ValueError(f"Некорректный флаг выбора или идентификатор в реестре для {name}")
+            raise ValueError(f"Invalid selection or registry identity for {name}")
         spec = registry[name]
         if spec.checkpoint and (Path(spec.checkpoint).name != spec.checkpoint):
-            raise ValueError(f"{name}: укажите точное имя файла весов из исходного проекта")
+            raise ValueError(f"{name}: checkpoint must be an explicit upstream filename")
 

@@ -20,7 +20,7 @@ def _provider():
     try:
         module = importlib.import_module("ultralytics")
     except ImportError as exc:
-        raise ImportError("Для запуска моделей установите ultralytics в Python-окружение этого ноутбука") from exc
+        raise ImportError("Install ultralytics in this notebook's Python environment to run models") from exc
     module.settings.update({"weights_dir": str(cmn.ORIGINAL_WEIGHTS_DIR.resolve()),
                             "datasets_dir": str(cmn.DATASETS_DIR.resolve()),
                             "runs_dir": str(cmn.RUNS_DIR.resolve())})
@@ -32,14 +32,14 @@ def _require(spec, operation):
     if reason:
         raise ValueError(f"{spec.id}: {reason}")
     if Path(spec.checkpoint).name != spec.checkpoint:
-        raise ValueError("В реестре указываются имена файлов весов исходного проекта, а не пути")
+        raise ValueError("Registry checkpoints must be upstream filenames, not paths")
 
 
 def _construct(spec, path):
     module = _provider()
     constructor = getattr(module, spec.constructor, None)
     if constructor is None:
-        raise RuntimeError(f"В установленной версии Ultralytics нет {spec.constructor}; установите версию с поддержкой {spec.id}")
+        raise RuntimeError(f"Installed Ultralytics lacks {spec.constructor}; install a version supporting {spec.id}")
     return constructor(str(path))
 
 
@@ -72,8 +72,8 @@ class UltralyticsBackend:
             requested = Path(temporary) / spec.checkpoint
             downloaded = Path(downloads.attempt_download_asset(str(requested), progress=False))
             if not downloaded.is_file() or not downloaded.stat().st_size:
-                raise FileNotFoundError(f"Не удалось скачать веса {spec.id}: {spec.checkpoint}. "
-                                        "Если веса требуют разрешения или ручного скачивания, поместите полученный файл по пути " + str(path))
+                raise FileNotFoundError(f"No checkpoint downloaded for {spec.id}: {spec.checkpoint}. "
+                                        "For gated/manual weights, place the authorized checkpoint at " + str(path))
             if downloaded.resolve() != requested.resolve():
                 shutil.copy2(downloaded, requested)
             requested.replace(path)
@@ -89,17 +89,17 @@ class UltralyticsBackend:
         _require(spec, "train")
         dataset_info = inspect_dataset(dataset, spec.task)
         if config.epochs <= 0 or config.image_size <= 0 or config.batch <= 0:
-            raise ValueError("epochs, image_size и batch должны быть положительными")
+            raise ValueError("epochs, image_size, and batch must be positive")
         reserved = {"data", "epochs", "imgsz", "batch", "device", "seed", "project", "name", "exist_ok", "resume", "save", "model", "task"}
         if reserved.intersection(config.options):
-            raise ValueError(f"Задайте {reserved.intersection(config.options)} через основные поля конфигурации, а не options")
+            raise ValueError(f"Use common configuration fields, not options, for {reserved.intersection(config.options)}")
         if not initial.checkpoint.is_file():
             raise FileNotFoundError(initial.checkpoint)
         model = _construct(spec, initial.checkpoint)
         if model.task != spec.task:
-            raise ValueError(f"Задача файла весов {model.task!r} не соответствует задаче в реестре {spec.task!r}")
+            raise ValueError(f"Checkpoint task {model.task!r} does not match registry task {spec.task!r}")
         if "trainer" not in model.task_map.get(model.task, {}):
-            raise UnsupportedOperation(f"{spec.id}: установленная версия Ultralytics не поддерживает обучение этой модели")
+            raise UnsupportedOperation(f"{spec.id}: installed Ultralytics has no trainer for this model")
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         run_name = f"{spec.id}-{stamp}-{uuid4().hex[:8]}"
         directory = cmn.RUNS_DIR / run_name
@@ -123,7 +123,7 @@ class UltralyticsBackend:
             best, last = Path(model.trainer.best), Path(model.trainer.last)
             for path in (best, last):
                 if not path.is_file():
-                    raise FileNotFoundError(f"После обучения не найден файл {path}")
+                    raise FileNotFoundError(f"Training did not produce {path}")
             metrics = dict(getattr(results, "results_dict", {}) or {})
             effective = getattr(model.trainer, "args", {})
             effective = vars(effective) if hasattr(effective, "__dict__") else effective
@@ -153,18 +153,18 @@ class UltralyticsPredictor:
         if isinstance(image, (str, Path)):
             from ..datasets import IMAGE_SUFFIXES
             if Path(image).suffix.lower() not in IMAGE_SUFFIXES or not Path(image).is_file():
-                raise ValueError("predict ожидает локальный файл изображения; видео, потоки и URL не поддерживаются")
+                raise ValueError("predict expects a local image file, not a video/stream/URL")
         elif isinstance(image, np.ndarray):
             if image.ndim != 3 or image.shape[2] != 3 or image.dtype != np.uint8:
-                raise ValueError("Массив изображения должен иметь форму H×W×3, тип uint8 и порядок каналов BGR")
+                raise ValueError("Array images must be H×W×3 uint8 in BGR order")
         else:
             from PIL.Image import Image
             if not isinstance(image, Image):
-                raise TypeError("Передайте путь к изображению, массив NumPy в BGR или изображение PIL")
+                raise TypeError("Use an image path, BGR numpy array, or PIL image")
         forbidden = {"source", "stream", "device", "model", "task", "mode", "predictor", "retina_masks",
                      "text", "texts", "points", "labels", "bboxes", "visual_prompts", "refer_image"}
         if forbidden.intersection(options):
-            raise ValueError("Задайте подсказки через prompts, а устройство — при загрузке; потоки и переопределение интерфейса не поддерживаются")
+            raise ValueError("Use the prompts argument and load-time device; streaming and interface overrides are unsupported")
         prompts = dict(prompts or {})
         constructor = self.spec.constructor
         sam3 = self.spec.checkpoint == "sam3.pt"
@@ -175,21 +175,21 @@ class UltralyticsPredictor:
             allowed = allowed | {"text", "exemplars"}
         unknown = prompts.keys() - allowed
         if unknown:
-            raise ValueError(f"{self.spec.id} не поддерживает подсказки: {sorted(unknown)}")
+            raise ValueError(f"{self.spec.id} does not support prompts: {sorted(unknown)}")
         if "labels" in prompts and "points" not in prompts:
-            raise ValueError("Метки labels требуют указания точек points")
+            raise ValueError("Point labels require points")
         if "refer_image" in prompts and "visual_prompts" not in prompts:
-            raise ValueError("Для refer_image необходимо задать visual_prompts")
+            raise ValueError("refer_image requires visual_prompts")
         if "text" in prompts:
             texts = prompts["text"]
             texts = [texts] if isinstance(texts, str) else texts
             if not isinstance(texts, list) or not texts or not all(isinstance(t, str) and t.strip() for t in texts):
-                raise ValueError("text должен быть непустой строкой или непустым списком строк")
+                raise ValueError("text must be a nonempty string or list of strings")
             prompts["text"] = texts
         if constructor == "YOLOE" and "text" in prompts and "visual_prompts" in prompts:
-            raise ValueError("Для каждого предсказания YOLOE выберите текстовые или визуальные подсказки")
+            raise ValueError("Choose text or visual prompts for each YOLOE prediction")
         if sam3 and ({"text", "exemplars"} & prompts.keys()) and ({"points", "labels", "bboxes"} & prompts.keys()):
-            raise ValueError("В SAM3 подсказки для поиска по понятиям нельзя объединять с интерактивными подсказками")
+            raise ValueError("SAM3 concept prompts cannot be combined with interactive prompts")
         kwargs = {"verbose": False, "save": False, **options}
         kwargs["device"] = self.device
         if self.spec.task in {"segment", "prompt_segment"}:
@@ -199,7 +199,7 @@ class UltralyticsPredictor:
             module = importlib.import_module("ultralytics.models.sam")
             cls = getattr(module, "SAM3SemanticPredictor", None)
             if cls is None:
-                raise RuntimeError("В установленной версии Ultralytics нет SAM3SemanticPredictor; обновите её для поиска по понятиям в SAM3")
+                raise RuntimeError("Installed Ultralytics lacks SAM3SemanticPredictor; upgrade for SAM3 concept prompts")
             overrides = dict(kwargs, model=str(self.artifacts.checkpoint), task="segment", mode="predict")
             if self.semantic is None or overrides != self.semantic_options:
                 self.semantic = cls(overrides=overrides)
@@ -240,7 +240,7 @@ def normalize_result(result, *, semantic_classes=True):
         mask_data = array(masks.data).astype(bool)
         # Нужен retina_masks=True: изменение размера масок с отступами нарушило бы координаты.
         if tuple(mask_data.shape[-2:]) != shape:
-            raise ValueError("Несмотря на retina_masks=True, провайдер вернул маски не в координатах исходного изображения")
+            raise ValueError("Provider returned masks outside original-image coordinates despite retina_masks=True")
     return Prediction(shape,
                       array(boxes.xyxy).reshape(-1, 4) if boxes is not None else np.empty((0, 4)),
                       array(boxes.conf) if boxes is not None else np.empty(0),
