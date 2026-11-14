@@ -19,14 +19,21 @@ def enabled_specs():
 
 
 def train_models(dataset: DatasetSpec, config: TrainConfig | None = None) -> TrainingBatch:
-    """Последовательно обучить включённые модели, пропустив неподдерживаемые интеграции.
+    """Обучить включённые модели без сохранённых обученных весов.
 
+    Существующие weights/trained/<model-id>.pt и неподдерживаемые модели пропускаются.
     Некорректные данные и непредвиденные ошибки провайдера останавливают выполнение.
     Описания завершённых запусков остаются на диске при сбое следующей модели.
     """
     batch = TrainingBatch()
     config = config or TrainConfig()
     for spec in enabled_specs():
+        trained = cmn.TRAINED_WEIGHTS_DIR / f"{spec.id}.pt"
+        if trained.is_file():
+            reason = f"Trained weights already exist: {trained}"
+            batch.skipped[spec.id] = reason
+            print(f"Skipped {spec.id}: {reason}")
+            continue
         reason = spec.unavailable_reason("train")
         if reason:
             batch.skipped[spec.id] = reason

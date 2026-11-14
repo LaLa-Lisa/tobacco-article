@@ -212,6 +212,40 @@ class ModelsTest(unittest.TestCase):
         self.assertEqual(set(result.runs), {"yolov8n"})
         backend.train.assert_called_once()
 
+    def test_batch_existing_weights_skip_all_training_work(self):
+        self.selection("yolov12n")
+        cmn.TRAINED_WEIGHTS_DIR.mkdir()
+        trained = cmn.TRAINED_WEIGHTS_DIR / "yolov12n.pt"
+        trained.write_bytes(b"trained")
+        with patch("scripts.workflows.get_backend") as factory, patch("scripts.workflows.inspect_dataset") as inspect:
+            result = workflows.train_models(DatasetSpec(self.root / "missing.yaml"))
+        factory.assert_not_called()
+        inspect.assert_not_called()
+        self.assertFalse(result.runs)
+        self.assertIn("Trained weights already exist", result.skipped["yolov12n"])
+        self.assertEqual(trained.read_bytes(), b"trained")
+
+    def test_batch_trains_only_missing_weights_and_skips_on_rerun(self):
+        self.selection("yolov8n", "yolov12n")
+        cmn.TRAINED_WEIGHTS_DIR.mkdir()
+        (cmn.TRAINED_WEIGHTS_DIR / "yolov8n.pt").write_bytes(b"existing")
+        cmn.ORIGINAL_WEIGHTS_DIR.mkdir()
+        (cmn.ORIGINAL_WEIGHTS_DIR / "yolo12n.pt").write_bytes(b"pretrained")
+        backend = Mock()
+        def train(spec, initial, dataset, config):
+            (cmn.TRAINED_WEIGHTS_DIR / f"{spec.id}.pt").write_bytes(b"trained")
+            return SimpleNamespace(directory=self.root)
+        backend.train.side_effect = train
+        with patch("scripts.workflows.get_backend", return_value=backend):
+            result = workflows.train_models(self.dataset())
+            rerun = workflows.train_models(self.dataset())
+        self.assertEqual(set(result.runs), {"yolov12n"})
+        self.assertEqual(set(result.skipped), {"yolov8n"})
+        self.assertFalse(rerun.runs)
+        self.assertEqual(set(rerun.skipped), {"yolov8n", "yolov12n"})
+        backend.download.assert_called_once_with(cmn.MODELS_REGESTRY["yolov12n"])
+        backend.train.assert_called_once()
+
     def test_unexpected_notimplemented_error_is_not_silently_skipped(self):
         self.selection("yolov8n")
         backend = Mock()
