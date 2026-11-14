@@ -18,3 +18,4 @@ experiments/results/yolo/yolov8*/
 
 *.pdf
 runs/
+weights/
