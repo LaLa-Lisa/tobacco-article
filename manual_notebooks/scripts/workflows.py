@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from . import common as cmn
 from .backends import get_backend
 from .contracts import DatasetSpec, ModelArtifacts, TrainConfig, TrainingRun, UnsupportedOperation
-from .datasets import inspect_dataset
 
 
 @dataclass
@@ -40,7 +39,6 @@ def train_models(dataset: DatasetSpec, config: TrainConfig | None = None) -> Tra
             print(f"Skipped {spec.id}: {reason}")
             continue
         try:
-            inspect_dataset(dataset, spec.task)  # Проверяем совместимость разметки до скачивания весов.
             backend = get_backend(spec)
             initial = backend.download(spec)
             batch.runs[spec.id] = backend.train(spec, initial, dataset, config)

@@ -11,7 +11,7 @@ from uuid import uuid4
 
 from .. import common as cmn
 from ..contracts import ModelArtifacts, ModelSpec, Prediction, TrainingRun, UnsupportedOperation
-from ..datasets import inspect_dataset
+IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
 
 
 def _provider():
@@ -87,7 +87,6 @@ class UltralyticsBackend:
 
     def train(self, spec, initial, dataset, config):
         _require(spec, "train")
-        dataset_info = inspect_dataset(dataset, spec.task)
         if config.epochs <= 0 or config.image_size <= 0 or config.batch <= 0:
             raise ValueError("epochs, image_size, and batch must be positive")
         reserved = {"data", "epochs", "imgsz", "batch", "device", "seed", "project", "name", "exist_ok", "resume", "save", "model", "task"}
@@ -112,7 +111,7 @@ class UltralyticsBackend:
             checkpoint_hash = hashlib.file_digest(source, "sha256").hexdigest()
         record = {"status": "running", "initial_checkpoint_sha256": checkpoint_hash, "model": asdict(spec), "initial_checkpoint": initial.checkpoint,
                   "ultralytics_version": _provider().__version__, "requested_config": args,
-                  "dataset": dataset_info}
+                  "dataset": {"yaml": str(Path(dataset.yaml).resolve()), "task": dataset.task}}
 
         def persist():
             manifest.write_text(json.dumps(_jsonable(record), indent=2) + "\n")
@@ -151,7 +150,6 @@ class UltralyticsPredictor:
         import numpy as np
 
         if isinstance(image, (str, Path)):
-            from ..datasets import IMAGE_SUFFIXES
             if Path(image).suffix.lower() not in IMAGE_SUFFIXES or not Path(image).is_file():
                 raise ValueError("predict expects a local image file, not a video/stream/URL")
         elif isinstance(image, np.ndarray):

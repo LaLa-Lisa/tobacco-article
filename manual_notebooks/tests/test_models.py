@@ -16,7 +16,6 @@ from scripts import common as cmn, weight, workflows
 from scripts.backends import get_backend
 from scripts.backends.ultralytics import UltralyticsBackend, normalize_result
 from scripts.contracts import DatasetSpec, ModelArtifacts, TrainConfig, UnsupportedOperation
-from scripts.datasets import inspect_dataset
 from scripts.registry import validate_registry
 
 
@@ -125,36 +124,10 @@ class ModelsTest(unittest.TestCase):
             self.assertEqual(weight.download_weights(return_paths=True), {"yolov8n": path})
             self.assertIsNone(weight.download_weights())
 
-    def test_split_file_relative_paths_and_bom(self):
-        data = self.dataset()
-        split = self.root / "split.txt"
-        split.write_text("\ufeff./images/a.jpg\n", encoding="utf-8")
-        data.yaml.write_text(f"path: {self.root}\ntrain: split.txt\nval: split.txt\nnames: [tobacco]\n")
-        info = inspect_dataset(data, "detect")
-        self.assertEqual(info["splits"]["train"]["images"], 1)
-
     def test_training_checkpoint_task_mismatch(self):
         with patch("scripts.backends.ultralytics._construct", return_value=SimpleNamespace(task="segment")):
             with self.assertRaisesRegex(ValueError, "Checkpoint task"):
                 self.backend.train(self.spec, self.artifacts, self.dataset(), TrainConfig())
-
-    def test_dataset_task_and_annotation_validation(self):
-        data = self.dataset()
-        info = inspect_dataset(data, "detect")
-        self.assertEqual(info["splits"]["train"]["annotations"], 1)
-        with self.assertRaises(ValueError):
-            inspect_dataset(data, "segment")
-        with self.assertRaises(ValueError):
-            inspect_dataset(replace(data, task="segment"), "segment")
-        polygon = self.dataset("0 0.1 0.1 0.8 0.1 0.8 0.8", task="segment")
-        self.assertEqual(inspect_dataset(polygon, "segment")["task"], "segment")
-
-    def test_dataset_split_hash_changes_with_annotations(self):
-        data = self.dataset()
-        before = inspect_dataset(data, "detect")
-        (self.root / "labels/a.txt").write_text("0 0.4 0.4 0.2 0.2")
-        after = inspect_dataset(data, "detect")
-        self.assertNotEqual(before["splits"], after["splits"])
 
     def fake_trainer(self, fail=False):
         model = Mock()
@@ -217,10 +190,9 @@ class ModelsTest(unittest.TestCase):
         cmn.TRAINED_WEIGHTS_DIR.mkdir()
         trained = cmn.TRAINED_WEIGHTS_DIR / "yolov12n.pt"
         trained.write_bytes(b"trained")
-        with patch("scripts.workflows.get_backend") as factory, patch("scripts.workflows.inspect_dataset") as inspect:
+        with patch("scripts.workflows.get_backend") as factory:
             result = workflows.train_models(DatasetSpec(self.root / "missing.yaml"))
         factory.assert_not_called()
-        inspect.assert_not_called()
         self.assertFalse(result.runs)
         self.assertIn("Trained weights already exist", result.skipped["yolov12n"])
         self.assertEqual(trained.read_bytes(), b"trained")
