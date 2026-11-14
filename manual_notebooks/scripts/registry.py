@@ -49,10 +49,16 @@ _add("rtmdet rtmdet-x faster-rcnn", backend="mmdetection", constructor=None,
      operations=frozenset(), note="Disabled: future mmdetection backend is not implemented")
 _add("rtmdet-ins", backend="mmdetection", task="segment", constructor=None,
      operations=frozenset(), note="Disabled: future mmdetection backend is not implemented")
-_add("rf-detr rf-detr-m", backend="rfdetr", constructor=None,
-     operations=frozenset(), note="Disabled: future rfdetr backend is not implemented")
-_add("rf-detr-seg", backend="rfdetr", task="segment", constructor=None,
-     operations=frozenset(), note="Disabled: future rfdetr backend is not implemented")
+_add("rf-detr", backend="rfdetr", constructor=None)
+_add("rf-detr-seg", backend="rfdetr", task="segment", constructor=None)
+for suffix, size in [("n", "Nano"), ("s", "Small"), ("m", "Medium"), ("l", "Large")]:
+    for segment in (False, True):
+        identifier = f"rf-detr-{'seg-' if segment else ''}{suffix}"
+        filename = (f"rf-detr-seg-{size.lower()}.pt" if segment else
+                    f"rf-detr-{size.lower()}{'-2026' if size == 'Large' else ''}.pth")
+        MODELS_REGESTRY[identifier] = ModelSpec(
+            identifier, "rfdetr", "segment" if segment else "detect",
+            f"RFDETR{'Seg' if segment else ''}{size}", filename, FULL)
 _add("yolov5 yolov6 yolov7 damo-yolo yolov13 rt-detrv2 rt-detrv2-s d-fine deim deimv2 rt-detrv4 tia-yolov5 yoloc-tiny",
      backend=None, constructor=None, operations=frozenset(),
      note="Disabled: requires an implementation outside the three planned backends")

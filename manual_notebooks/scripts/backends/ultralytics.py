@@ -89,9 +89,10 @@ class UltralyticsBackend:
         _require(spec, "train")
         if config.epochs <= 0 or config.image_size <= 0 or config.batch <= 0:
             raise ValueError("epochs, image_size, and batch must be positive")
+        options = config.options_for("ultralytics")
         reserved = {"data", "epochs", "imgsz", "batch", "device", "seed", "project", "name", "exist_ok", "resume", "save", "model", "task"}
-        if reserved.intersection(config.options):
-            raise ValueError(f"Use common configuration fields, not options, for {reserved.intersection(config.options)}")
+        if reserved.intersection(options):
+            raise ValueError(f"Use common configuration fields, not options, for {reserved.intersection(options)}")
         if not initial.checkpoint.is_file():
             raise FileNotFoundError(initial.checkpoint)
         model = _construct(spec, initial.checkpoint)
@@ -103,7 +104,7 @@ class UltralyticsBackend:
         run_name = f"{spec.id}-{stamp}-{uuid4().hex[:8]}"
         directory = cmn.RUNS_DIR / run_name
         directory.mkdir(parents=True, exist_ok=False)
-        args = dict(config.options, data=str(Path(dataset.yaml).resolve()), epochs=config.epochs,
+        args = dict(options, data=str(Path(dataset.yaml).resolve()), epochs=config.epochs,
                     imgsz=config.image_size, batch=config.batch, device=config.device, seed=config.seed,
                     project=str(cmn.RUNS_DIR.resolve()), name=run_name, exist_ok=True, save=True)
         manifest = directory / "manifest.json"

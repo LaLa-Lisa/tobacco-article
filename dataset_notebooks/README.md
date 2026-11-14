@@ -194,3 +194,18 @@ kernels with their flags disabled in memory, without changing saved settings. It
 checks migration, overlap resolution, COCO, YOLO, fake-model labeling, review,
 and reference-prompt routing with a fake model.
 It does not train, use real images, or evaluate model accuracy.
+
+## Prepare a fresh YOLO split
+
+Open `07_prepare_yolo_split.ipynb` after finalizing `data/tobacco_migrated`.
+Set `RUN_SPLIT = True` and run all cells. The notebook validates detection labels
+and randomly shuffles images with `SEED = 42`, using 80% train, 10% validation,
+and the remainder for test. Fractions and seed are configurable. Campaigns, old
+splits, and the migration manifest are not used. Related patches can land in
+different splits; this is an image-level evaluation protocol.
+
+It writes `train.txt`, `val.txt`, `test.txt`, `data.yaml`, and `split_summary.json`
+without moving images or labels. Existing outputs require `OVERWRITE = True`.
+The YAML uses an absolute dataset root; regenerate it after moving the dataset.
+Only Python's standard library is required. The manual training notebook now
+uses this YAML and the existing trained-weights directory.

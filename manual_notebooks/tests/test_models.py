@@ -47,7 +47,7 @@ class ModelsTest(unittest.TestCase):
 
     def test_catalog_coverage_and_mapping(self):
         validate_registry(cmn.MODELS)
-        self.assertEqual(len(cmn.MODELS), 53)
+        self.assertEqual(len(cmn.MODELS), 60)
         self.assertEqual(cmn.MODELS_REGESTRY["yolov12n"].checkpoint, "yolo12n.pt")
         self.assertEqual(cmn.MODELS_REGESTRY["sam2-hiera-b-plus"].checkpoint, "sam2_b.pt")
         self.assertIsNotNone(cmn.MODELS_REGESTRY["yolov8"].unavailable_reason("download"))

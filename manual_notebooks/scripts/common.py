@@ -3,8 +3,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 DATASETS_DIR = ROOT / "data"
-DATASET_PATH = DATASETS_DIR / "tobacco_yolo"
-DATA_YAML = DATASET_PATH / "data.generated.yaml"
+DATASET_PATH = DATASETS_DIR / "tobacco_migrated"
+DATA_YAML = DATASET_PATH / "data.yaml"
 
 WEIGHTS_DIR = ROOT / "weights"
 ORIGINAL_WEIGHTS_DIR = WEIGHTS_DIR / "original"
@@ -51,8 +51,11 @@ MODELS = {
     "deim": False,  # Отключено: нужна реализация вне трёх запланированных бэкендов
     "deimv2": False,  # Отключено: нужна реализация вне трёх запланированных бэкендов
     "rt-detrv4": False,  # Отключено: нужна реализация вне трёх запланированных бэкендов
-    "rf-detr": False,  # Отключено: бэкенд rfdetr запланирован, но пока не реализован
-    "rf-detr-m": False,  # Отключено: бэкенд rfdetr запланирован, но пока не реализован
+    "rf-detr": False,
+    "rf-detr-m": True,
+    "rf-detr-n": False,
+    "rf-detr-s": False,
+    "rf-detr-l": False,
     "faster-rcnn": False,  # Отключено: бэкенд mmdetection запланирован, но пока не реализован
 
     # Сегментация экземпляров и семантическая сегментация.
@@ -63,7 +66,11 @@ MODELS = {
     "yolo11m-seg": False,
     "yolo26-seg": False,
     "rtmdet-ins": False,  # Отключено: бэкенд mmdetection запланирован, но пока не реализован
-    "rf-detr-seg": False,  # Отключено: бэкенд rfdetr запланирован, но пока не реализован
+    "rf-detr-seg": False,
+    "rf-detr-seg-n": False,
+    "rf-detr-seg-s": False,
+    "rf-detr-seg-m": False,
+    "rf-detr-seg-l": False,
     "pidnet": False,  # Отключено: этот бэкенд не входит в текущий план
     "pidnet-s": False,  # Отключено: этот бэкенд не входит в текущий план
     "efficientvit": False,  # Отключено: этот бэкенд не входит в текущий план

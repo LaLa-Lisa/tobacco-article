@@ -19,7 +19,7 @@ class ModelSpec:
     note: str = ""
 
     def unavailable_reason(self, operation: str) -> str | None:
-        if self.backend != "ultralytics":
+        if self.backend not in {"ultralytics", "rfdetr"}:
             return self.note or f"Backend {self.backend!r} is not implemented"
         if not self.checkpoint:
             return "Requires a concrete variant/checkpoint in MODELS_REGESTRY"
@@ -48,6 +48,10 @@ class TrainConfig:
     device: str = "cpu"
     seed: int = 0
     options: dict[str, Any] = field(default_factory=dict)
+    backend_options: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+    def options_for(self, backend: str) -> dict[str, Any]:
+        return {**self.options, **self.backend_options.get(backend, {})}
 
 
 @dataclass(frozen=True)
