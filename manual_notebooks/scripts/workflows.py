@@ -1,0 +1,55 @@
+"""Управление запуском из ноутбука; выбор моделей всегда берётся из common.MODELS."""
+from dataclasses import dataclass, field
+
+from . import common as cmn
+from .backends import get_backend
+from .contracts import DatasetSpec, ModelArtifacts, TrainConfig, TrainingRun, UnsupportedOperation
+from .datasets import inspect_dataset
+
+
+@dataclass
+class TrainingBatch:
+    runs: dict[str, TrainingRun] = field(default_factory=dict)
+    skipped: dict[str, str] = field(default_factory=dict)
+
+
+def enabled_specs():
+    cmn.validate_registry(cmn.MODELS, cmn.MODELS_REGESTRY)
+    return [cmn.MODELS_REGESTRY[name] for name, enabled in cmn.MODELS.items() if enabled]
+
+
+def train_models(dataset: DatasetSpec, config: TrainConfig | None = None) -> TrainingBatch:
+    """Последовательно обучить включённые модели, пропустив неподдерживаемые интеграции.
+
+    Некорректные данные и непредвиденные ошибки провайдера останавливают выполнение.
+    Описания завершённых запусков остаются на диске при сбое следующей модели.
+    """
+    batch = TrainingBatch()
+    config = config or TrainConfig()
+    for spec in enabled_specs():
+        reason = spec.unavailable_reason("train")
+        if reason:
+            batch.skipped[spec.id] = reason
+            print(f"Пропущено {spec.id}: {reason}")
+            continue
+        try:
+            inspect_dataset(dataset, spec.task)  # Проверяем совместимость разметки до скачивания весов.
+            backend = get_backend(spec)
+            initial = backend.download(spec)
+            batch.runs[spec.id] = backend.train(spec, initial, dataset, config)
+            print(f"Завершено {spec.id}: {batch.runs[spec.id].directory}")
+        except UnsupportedOperation as exc:
+            batch.skipped[spec.id] = str(exc)
+            print(f"Пропущено {spec.id}: {exc}")
+        except Exception as exc:
+            raise RuntimeError(f"Ошибка обучения {spec.id}: {exc}") from exc
+    if not batch.runs:
+        print("Ни один запуск обучения не завершён. Проверьте MODELS и причины пропуска.")
+    return batch
+
+
+def load_model(model_id: str, artifacts: ModelArtifacts, *, device="cpu"):
+    """Загрузить явно выбранные веса без автоматической подмены предобученными."""
+    cmn.validate_registry(cmn.MODELS, cmn.MODELS_REGESTRY)
+    spec = cmn.MODELS_REGESTRY[model_id]
+    return get_backend(spec).load(spec, artifacts, device)
