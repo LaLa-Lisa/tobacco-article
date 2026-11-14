@@ -11,8 +11,8 @@ def inspect_weights():
     from IPython.display import display
 
     rows = []
-    for model_name, model_enabled in cmn.MODELS.items():
-        if not model_enabled:
+    for model_name, enabled in cmn.MODELS.items():
+        if not enabled:
             continue
 
         filename = model_name if model_name.endswith(".pt") else f"{model_name}.pt"
