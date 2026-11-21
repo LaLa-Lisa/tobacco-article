@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import platform
 import sys
+import time
 
 from .core import (BenchmarkConfig, DeviceMetrics, make_schedule, measure_run,
                         save_run, sha256, write_json)
@@ -61,12 +62,21 @@ def run_worker(request):
     try:
         predictor = load_model(spec.id, ModelArtifacts(Path(payload['checkpoint'])), device=metrics.device)
         for index, rate in enumerate(manifest['schedule']):
+            def report(stage, completed=index):
+                if payload.get('progress', False):
+                    write_json(directory / 'progress.json', dict(
+                        stage=stage, completed=completed, stage_started=time.monotonic(),
+                        mode='Direct' if rate is None else f'Stream {rate:g} FPS'))
+
             print('Running direct inference' if rate is None else f'Running stream, input FPS {rate}', flush=True)
+            report('Warming up')
             run = measure_run(predictor, images, metrics, config, input_fps=rate,
-                              options=payload['options'], prompts=payload['prompts'])
+                              options=payload['options'], prompts=payload['prompts'],
+                              on_measurement_start=lambda: report('Measuring'))
             run.update(model_id=spec.id, device=metrics.device)
             run['summary']['rss_baseline_bytes'] = manifest['rss_baseline_bytes']
             save_run(directory, index, run)
+            report('Saved', completed=index + 1)
             print(run['summary'], flush=True)
         manifest['status'] = 'completed'
     except BaseException as exc:

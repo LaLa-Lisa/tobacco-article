@@ -14,9 +14,30 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.benchmark import core as bm
 from scripts import common as cmn
 from scripts.benchmark.plots import completion_fps_bins
+from scripts.benchmark.progress import BenchmarkProgress
 
 
 class BenchmarkTest(unittest.TestCase):
+    def test_progress_counts_saved_runs_once_across_workers(self):
+        bar = Mock(n=0)
+        progress = BenchmarkProgress(4, bar_factory=Mock(return_value=bar))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for worker in ('first', 'second'):
+                path = root / worker
+                path.mkdir()
+                progress.start_worker(path, worker, 'cpu')
+                progress.refresh()  # Загрузка: файл статуса ещё не создан.
+                for completed in (0, 1, 1, 2):
+                    bm.write_json(path / 'progress.json', dict(
+                        completed=completed, stage='Measuring', mode='Direct', stage_started=10))
+                    with patch('scripts.benchmark.progress.time.monotonic', return_value=13):
+                        progress.refresh()
+            self.assertEqual(bar.n, 4)
+            self.assertIn('Measuring (3s)', bar.set_postfix_str.call_args.args[0])
+        progress.close('completed')
+        bar.close.assert_called_once()
+
     def test_fps_bins_include_empty_and_partial_windows(self):
         run = dict(initial={'timestamp': 10}, final={'timestamp': 12.5},
                    records=[{'completed_at': t} for t in (10.2, 10.8, 12.5)])
@@ -134,8 +155,10 @@ class BenchmarkTest(unittest.TestCase):
         with patch.object(bm.time, 'perf_counter', side_effect=[10, 10, 12, 12]):
             run = bm.measure_run(predictor, [object()], metrics,
                                  bm.BenchmarkConfig(warmup_frames=2, duration_s=1),
-                                 options={'conf': 0.25}, sampler_factory=lambda _: sampler)
-        self.assertEqual(events, ['predict', 'sync', 'predict', 'sync', 'reset', 'sync', 'predict', 'sync'])
+                                 options={'conf': 0.25}, sampler_factory=lambda _: sampler,
+                                 on_measurement_start=lambda: events.append('progress'))
+        self.assertEqual(events, ['predict', 'sync', 'predict', 'sync', 'progress',
+                                  'reset', 'sync', 'predict', 'sync'])
         self.assertEqual(run['summary']['processed'], 1)
         self.assertEqual(run['summary']['processing_fps'], 0.5)
         self.assertEqual(run['summary']['prediction_ms_mean'], 2000)
@@ -197,9 +220,11 @@ class BenchmarkTest(unittest.TestCase):
 
             with patch('scripts.workflows.enabled_specs', return_value=[cmn.MODELS_REGESTRY['yolov8n']]), \
                  patch.object(bm.subprocess, 'Popen', side_effect=started), \
+                 patch.object(bm, 'BenchmarkProgress') as reporter, \
                  patch.object(bm.time, 'sleep', side_effect=KeyboardInterrupt):
                 with self.assertRaises(KeyboardInterrupt):
                     bm.run_benchmarks({'yolov8n': checkpoint}, [image], output_root=root / 'results')
+            reporter.return_value.close.assert_called_once_with('interrupted')
             process.terminate.assert_called_once()
             process.wait.assert_called_once_with(timeout=5)
             output = next((root / 'results').iterdir())
@@ -223,9 +248,11 @@ class BenchmarkTest(unittest.TestCase):
             process = Mock(returncode=1)
             process.poll.return_value = 1
             with patch('scripts.workflows.enabled_specs', return_value=[cmn.MODELS_REGESTRY['yolov8n']]), \
+                 patch.object(bm, 'BenchmarkProgress') as reporter, \
                  patch.object(bm.subprocess, 'Popen', return_value=process):
                 with self.assertRaisesRegex(RuntimeError, 'worker failed'):
                     bm.run_benchmarks({'yolov8n': checkpoint}, [image], output_root=root / 'results')
+            reporter.return_value.close.assert_called_once_with('failed')
             output = next((root / 'results').iterdir())
             manifest = json.loads((output / 'manifest.json').read_text())
             self.assertEqual(manifest['status'], 'failed')

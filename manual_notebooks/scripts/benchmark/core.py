@@ -14,6 +14,8 @@ import threading
 import time
 import uuid
 
+from .progress import BenchmarkProgress
+
 
 @dataclass(frozen=True)
 class BenchmarkConfig:
@@ -200,7 +202,8 @@ def summarize(records, elapsed_s):
 
 
 def measure_run(predictor, images, metrics, config, *, input_fps=None,
-                options=None, prompts=None, sampler_factory=MemorySampler):
+                options=None, prompts=None, sampler_factory=MemorySampler,
+                on_measurement_start=None):
     """Прогрев и отдельное окно измерения; объекты предсказаний не накапливаются."""
     config.validate()
     if not images:
@@ -210,6 +213,9 @@ def measure_run(predictor, images, metrics, config, *, input_fps=None,
         result = predictor.predict(images[index % len(images)], prompts=prompts, **options)
         metrics.synchronize()
         del result
+    # Уведомление выполняется до сброса пиков памяти и начала измеряемого окна.
+    if on_measurement_start is not None:
+        on_measurement_start()
     metrics.reset()
     warm_memory = metrics.memory()
     sampler = sampler_factory(config.memory_interval_s)
@@ -310,7 +316,8 @@ def make_schedule(config):
 
 
 def run_benchmarks(checkpoints, image_paths, *, devices=('cpu',), config=None,
-                   prediction_options=None, prompts=None, output_root=None, notes=''):
+                   prediction_options=None, prompts=None, output_root=None, notes='',
+                   progress=True):
     """Снимок MODELS и реестра передаётся свежему процессу для каждой пары модель/устройство."""
     from .. import common as cmn
     from ..workflows import enabled_specs
@@ -345,6 +352,7 @@ def run_benchmarks(checkpoints, image_paths, *, devices=('cpu',), config=None,
                           prompts=(prompts or {}).get(spec.id)))
     if not specs:
         raise ValueError('No enabled supported models to benchmark')
+    runs_per_worker = len(make_schedule(config))
     root = Path(output_root or cmn.ROOT / 'experiments' / 'benchmarks').resolve()
     directory = root / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ-') + uuid.uuid4().hex[:8])
     directory.mkdir(parents=True)
@@ -354,15 +362,21 @@ def run_benchmarks(checkpoints, image_paths, *, devices=('cpu',), config=None,
     write_json(directory / 'manifest.json', manifest)
     print(f'Benchmark directory: {directory}', flush=True)
     process = None
+    reporter = None
     try:
+        if progress:
+            reporter = BenchmarkProgress(len(specs) * len(devices) * runs_per_worker)
         for item in specs:
             for device in devices:
                 worker_dir = directory / f"{item['spec']['id']}-{device.replace(':', '-')}"
                 worker_dir.mkdir()
-                payload = dict(item, device=device, images=images, config=asdict(config), notes=notes)
+                payload = dict(item, device=device, images=images, config=asdict(config), notes=notes,
+                               progress=progress)
                 request = worker_dir / 'request.json'
                 write_json(request, payload)
                 print(f"Running {item['spec']['id']} on {device}; log: {worker_dir / 'worker.log'}", flush=True)
+                if reporter:
+                    reporter.start_worker(worker_dir, item['spec']['id'], device)
                 with (worker_dir / 'worker.log').open('w', encoding='utf-8') as log:
                     environment = dict(os.environ, YOLO_CONFIG_DIR=str(cmn.YOLO_CONFIG_DIR))
                     process = subprocess.Popen(
@@ -370,7 +384,11 @@ def run_benchmarks(checkpoints, image_paths, *, devices=('cpu',), config=None,
                         cwd=Path(__file__).resolve().parents[2], env=environment,
                         stdout=log, stderr=subprocess.STDOUT)
                     while process.poll() is None:
-                        time.sleep(0.2)
+                        if reporter:
+                            reporter.refresh()
+                        time.sleep(1.0)
+                    if reporter:
+                        reporter.refresh()
                     if process.returncode:
                         raise RuntimeError(f'Benchmark worker failed; see {worker_dir / "worker.log"}')
                 manifest['completed_workers'].append(worker_dir.name)
@@ -382,6 +400,8 @@ def run_benchmarks(checkpoints, image_paths, *, devices=('cpu',), config=None,
                         error=f'{type(exc).__name__}: {exc}')
         raise
     finally:
+        if reporter:
+            reporter.close(manifest['status'])
         if process is not None and process.poll() is None:
             process.terminate()
             try:

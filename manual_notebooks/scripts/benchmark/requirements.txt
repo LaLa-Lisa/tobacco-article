@@ -4,3 +4,4 @@ Pillow
 psutil>=5.9
 pandas
 matplotlib
+tqdm>=4.64

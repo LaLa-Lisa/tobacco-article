@@ -1,31 +1,71 @@
 """Таблицы и графики сохранённых измерений; предсказания здесь не запускаются."""
+from pathlib import Path
+
 from .core import load_runs, positive
+from .measurement import MeasurementRun, MeasurementSeries, load_measurement_runs
 
 
 def completion_fps_bins(run, bin_seconds=1.0):
-    """Число завершённых кадров / ширина окна; последнее окно может быть короче."""
+    """Совместимый интерфейс для словарей и объектов замеров."""
     import numpy as np
-    positive(bin_seconds, 'bin_seconds')
-    elapsed = run['final']['timestamp'] - run['initial']['timestamp']
-    positive(elapsed, 'elapsed_s')
-    edges = np.append(np.arange(0, elapsed, bin_seconds), elapsed)
-    offsets = np.array([row['completed_at'] for row in run['records']]) - run['initial']['timestamp']
-    counts, _ = np.histogram(offsets, bins=edges)
-    return edges, counts / np.diff(edges)
+    if not isinstance(run, MeasurementRun):
+        run = MeasurementRun.from_dict(run)
+    series = run.fps(bin_seconds=bin_seconds)
+    return np.asarray(series.bin_edges), np.asarray(series.values)
+
+
+def _measurement_runs(source):
+    if isinstance(source, (str, Path)):
+        return load_measurement_runs(source)
+    if isinstance(source, MeasurementRun):
+        return [source]
+    return list(source)
+
+
+def plot_series(series, *, ax=None, kind='binned', bin_seconds=1.0):
+    """Показать замеры или готовые ряды; вернуть Axes для дальнейшей настройки."""
+    import matplotlib.pyplot as plt
+    if isinstance(series, (MeasurementRun, MeasurementSeries)):
+        series = [series]
+    series = [value.fps(kind=kind, bin_seconds=bin_seconds)
+              if isinstance(value, MeasurementRun) else value for value in series]
+    if any(not isinstance(value, MeasurementSeries) for value in series):
+        raise TypeError('Expected MeasurementRun or MeasurementSeries objects')
+    units = {value.unit for value in series}
+    if len(units) > 1:
+        raise ValueError('Plot series with different units on separate axes')
+    show = ax is None
+    if ax is None:
+        _, ax = plt.subplots(figsize=(11, 4))
+    for value in series:
+        if value.bin_edges is None:
+            ax.plot(value.times, value.plot_values, marker='.', markersize=3,
+                    linewidth=1, label=value.label)
+        else:
+            ax.stairs(value.plot_values, value.bin_edges, baseline=None, label=value.label)
+    ax.set(xlabel='Time since measurement start (s)', ylabel=next(iter(units), 'FPS'))
+    ax.grid(alpha=0.25)
+    if series:
+        ax.set_xlim(min(value.start_s for value in series), max(value.end_s for value in series))
+        ax.legend()
+    if show:
+        ax.figure.tight_layout()
+        plt.show()
+    return ax
 
 
 def plot_fps_over_time(directory, bin_seconds=1.0):
     """Отдельная фигура для модели/устройства, панели по режиму и входной частоте."""
     import matplotlib.pyplot as plt
     positive(bin_seconds, 'bin_seconds')
-    runs = load_runs(directory)
+    runs = _measurement_runs(directory)
     if not runs:
         print('No completed runs found')
         return
     groups = {}
     for run in runs:
-        groups.setdefault((run['model_id'], run['device']), {}).setdefault(
-            (run['mode'], run['input_fps']), []).append(run)
+        groups.setdefault((run.model_id, run.device), {}).setdefault(
+            (run.mode, run.input_fps), []).append(run)
     for (model_id, device), modes in groups.items():
         fig, axes = plt.subplots(len(modes), 1, figsize=(11, 3.5 * len(modes)), squeeze=False)
         for ax, ((mode, rate), measurements) in zip(axes[:, 0], modes.items()):
@@ -45,25 +85,25 @@ def plot_fps_over_time(directory, bin_seconds=1.0):
 def plot_latency_over_time(directory):
     """Задержки каждого кадра по времени завершения; без фильтрации и усреднения."""
     import matplotlib.pyplot as plt
-    runs = load_runs(directory)
+    runs = _measurement_runs(directory)
     if not runs:
         print('No completed runs found')
         return
     groups = {}
     for run in runs:
-        groups.setdefault((run['model_id'], run['device']), {}).setdefault(
-            (run['mode'], run['input_fps']), []).append(run)
+        groups.setdefault((run.model_id, run.device), {}).setdefault(
+            (run.mode, run.input_fps), []).append(run)
     for (model_id, device), modes in groups.items():
         fig, axes = plt.subplots(len(modes), 1, figsize=(11, 3.5 * len(modes)), squeeze=False)
         for ax, ((mode, rate), measurements) in zip(axes[:, 0], modes.items()):
             for index, run in enumerate(measurements, 1):
-                records = run['records']
-                times = [row['completed_at'] - run['initial']['timestamp'] for row in records]
-                line, = ax.plot(times, [row['prediction_ms'] for row in records],
+                prediction = run.latency()
+                line, = ax.plot(prediction.times, prediction.values,
                                 marker='.', markersize=3, linewidth=1,
                                 label="Prediction" if len(measurements) == 1 else f"Prediction — run {index}")
                 if mode == 'stream':
-                    ax.plot(times, [row['frame_latency_ms'] for row in records],
+                    frame = run.latency('frame_latency_ms')
+                    ax.plot(frame.times, frame.values,
                             color=line.get_color(), linestyle='--', linewidth=1,
                             marker='.', markersize=3,
                             label="Frame incl. queue" if len(measurements) == 1 else f"Frame incl. queue — run {index}")
