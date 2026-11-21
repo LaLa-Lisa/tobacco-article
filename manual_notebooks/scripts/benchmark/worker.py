@@ -6,7 +6,7 @@ from pathlib import Path
 import platform
 import sys
 
-from .benchmark import (BenchmarkConfig, DeviceMetrics, make_schedule, measure_run,
+from .core import (BenchmarkConfig, DeviceMetrics, make_schedule, measure_run,
                         save_run, sha256, write_json)
 
 
@@ -14,9 +14,9 @@ def run_worker(request):
     import numpy as np
     import psutil
     from PIL import Image
-    from . import common as cmn
-    from .contracts import ModelArtifacts, ModelSpec
-    from .workflows import load_model
+    from .. import common as cmn
+    from ..contracts import ModelArtifacts, ModelSpec
+    from ..workflows import load_model
 
     directory = Path(request).parent
     payload = json.loads(Path(request).read_text(encoding='utf-8'))

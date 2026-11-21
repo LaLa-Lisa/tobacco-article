@@ -1,6 +1,17 @@
 # Измерение FPS, задержки и памяти
 
-`fps_measure.ipynb` сравнивает включённые в `scripts.common.MODELS` модели через
+## Структура
+
+- `core.py` — измерения, сбор памяти, сохранение результатов и запуск процессов.
+- `worker.py` — выполнение модели в отдельном процессе (`scripts.benchmark.worker`).
+- `plots.py` — таблицы и графики сохранённых результатов.
+- `requirements.txt` — дополнительные зависимости измерений и визуализации.
+- `__init__.py` — публичные `BenchmarkConfig`, `run_benchmarks`, `load_runs`.
+
+Ноутбук остаётся в `manual_notebooks/fps_measure.ipynb`, автономные тесты —
+в `manual_notebooks/tests/test_benchmark.py`.
+
+[`fps_measure.ipynb`](../../fps_measure.ipynb) сравнивает включённые в `scripts.common.MODELS` модели через
 существующие адаптеры Ultralytics и RF-DETR. За основу взяты прогрев,
 синхронизация и поток с заменой непрочитанных кадров из `first.ipynb`.
 Исторические результаты не переносятся в новые измерения. Команды STOP/MOVE
@@ -9,7 +20,7 @@
 ## Подготовка и запуск
 
 1. Выберите Jupyter kernel с PyTorch и зависимостями нужных провайдеров.
-   Дополнительные зависимости: `python -m pip install -r manual_notebooks/requirements-benchmark.txt`
+   Дополнительные зависимости: `python -m pip install -r manual_notebooks/scripts/benchmark/requirements.txt`
    из корня проекта. RF-DETR требует отдельного `requirements-rfdetr.txt`.
 2. Откройте ноутбук из корня проекта или `manual_notebooks/`. Измените флаги
    `cmn.MODELS`, явные пути `CHECKPOINTS`, `IMAGE_PATHS` и `DEVICES`.

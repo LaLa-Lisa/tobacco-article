@@ -1,5 +1,5 @@
 """Таблицы и графики сохранённых измерений; предсказания здесь не запускаются."""
-from .benchmark import load_runs, positive
+from .core import load_runs, positive
 
 
 def completion_fps_bins(run, bin_seconds=1.0):

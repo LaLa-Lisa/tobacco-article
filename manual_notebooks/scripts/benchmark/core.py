@@ -312,8 +312,8 @@ def make_schedule(config):
 def run_benchmarks(checkpoints, image_paths, *, devices=('cpu',), config=None,
                    prediction_options=None, prompts=None, output_root=None, notes=''):
     """Снимок MODELS и реестра передаётся свежему процессу для каждой пары модель/устройство."""
-    from . import common as cmn
-    from .workflows import enabled_specs
+    from .. import common as cmn
+    from ..workflows import enabled_specs
     config = config or BenchmarkConfig()
     config.validate()
     devices = list(devices)
@@ -366,8 +366,8 @@ def run_benchmarks(checkpoints, image_paths, *, devices=('cpu',), config=None,
                 with (worker_dir / 'worker.log').open('w', encoding='utf-8') as log:
                     environment = dict(os.environ, YOLO_CONFIG_DIR=str(cmn.YOLO_CONFIG_DIR))
                     process = subprocess.Popen(
-                        [sys.executable, '-m', 'scripts.benchmark_worker', str(request)],
-                        cwd=Path(__file__).resolve().parents[1], env=environment,
+                        [sys.executable, '-m', 'scripts.benchmark.worker', str(request)],
+                        cwd=Path(__file__).resolve().parents[2], env=environment,
                         stdout=log, stderr=subprocess.STDOUT)
                     while process.poll() is None:
                         time.sleep(0.2)

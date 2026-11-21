@@ -11,9 +11,9 @@ from unittest.mock import Mock, patch
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from scripts import benchmark as bm
+from scripts.benchmark import core as bm
 from scripts import common as cmn
-from scripts.benchmark_plots import completion_fps_bins
+from scripts.benchmark.plots import completion_fps_bins
 
 
 class BenchmarkTest(unittest.TestCase):
