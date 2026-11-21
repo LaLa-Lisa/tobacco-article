@@ -45,7 +45,7 @@ class BenchmarkTest(unittest.TestCase):
 
     def test_invalid_configuration(self):
         for kwargs in ({'duration_s': 0}, {'duration_s': float('nan')},
-                       {'warmup_frames': 0}, {'warmup_frames': True}, {'repetitions': -1},
+                       {'warmup_frames': 0}, {'warmup_frames': True},
                        {'memory_interval_s': -1}, {'input_rates': (0,)},
                        {'stream': True, 'input_rates': ()}, {'direct': False},
                        {'input_rates': (10, 10)}):
@@ -55,9 +55,10 @@ class BenchmarkTest(unittest.TestCase):
     def test_schedule_reproducible_and_complete(self):
         config = bm.BenchmarkConfig(stream=True)
         self.assertEqual(bm.make_schedule(config), bm.make_schedule(config))
-        for rep in range(1, 4):
-            self.assertCountEqual([rate for repeat, rate in bm.make_schedule(config) if repeat == rep],
-                                  [None, 10, 20, 30, 60, 300])
+        self.assertCountEqual(bm.make_schedule(config), [None, 10, 20, 30, 60, 300])
+        self.assertEqual(bm.make_schedule(bm.BenchmarkConfig()), [None])
+        self.assertCountEqual(bm.make_schedule(bm.BenchmarkConfig(direct=False, stream=True)),
+                              [10, 20, 30, 60, 300])
 
     def test_queue_replacement_and_close(self):
         with patch.object(bm.LatestFrameStream, '_produce'):
@@ -191,7 +192,7 @@ class BenchmarkTest(unittest.TestCase):
                 request = Path(args[0][-1])
                 bm.save_run(request.parent, 0, dict(
                     model_id='yolov8n', device='cpu', mode='direct', input_fps=None,
-                    repetition=1, summary={'processing_fps': 1}, records=[]))
+                    summary={'processing_fps': 1}, records=[]))
                 return process
 
             with patch('scripts.workflows.enabled_specs', return_value=[cmn.MODELS_REGESTRY['yolov8n']]), \
@@ -208,7 +209,7 @@ class BenchmarkTest(unittest.TestCase):
     def test_persistence_keeps_completed_run(self):
         with tempfile.TemporaryDirectory() as directory:
             run = dict(model_id='test', device='cpu', mode='direct', input_fps=None,
-                       repetition=1, summary={'processing_fps': 42}, records=[])
+                       summary={'processing_fps': 42}, records=[])
             bm.save_run(directory, 0, run)
             self.assertEqual(bm.load_runs(directory), [run])
             self.assertIn('42', (Path(directory) / 'summary.csv').read_text())

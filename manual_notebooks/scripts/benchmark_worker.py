@@ -40,7 +40,7 @@ def run_worker(request):
         except importlib.metadata.PackageNotFoundError:
             packages[name] = None
     torch = metrics.torch
-    manifest = dict(schema_version=1, status='running', model_id=spec.id, device=metrics.device,
+    manifest = dict(schema_version=2, status='running', model_id=spec.id, device=metrics.device,
                     backend=spec.backend, checkpoint=payload['checkpoint'],
                     checkpoint_sha256=sha256(payload['checkpoint']), inputs=inputs,
                     config=asdict(config), options=payload['options'], prompts=payload['prompts'],
@@ -60,11 +60,11 @@ def run_worker(request):
     write_json(directory / 'manifest.json', manifest)
     try:
         predictor = load_model(spec.id, ModelArtifacts(Path(payload['checkpoint'])), device=metrics.device)
-        for index, (repetition, rate) in enumerate(manifest['schedule']):
-            print(f'Running repeat {repetition}, input FPS {rate}', flush=True)
+        for index, rate in enumerate(manifest['schedule']):
+            print('Running direct inference' if rate is None else f'Running stream, input FPS {rate}', flush=True)
             run = measure_run(predictor, images, metrics, config, input_fps=rate,
                               options=payload['options'], prompts=payload['prompts'])
-            run.update(model_id=spec.id, device=metrics.device, repetition=repetition)
+            run.update(model_id=spec.id, device=metrics.device)
             run['summary']['rss_baseline_bytes'] = manifest['rss_baseline_bytes']
             save_run(directory, index, run)
             print(run['summary'], flush=True)

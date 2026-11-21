@@ -52,7 +52,7 @@ MODELS = {
     "deimv2": False,  # Отключено: нужна реализация вне трёх запланированных бэкендов
     "rt-detrv4": False,  # Отключено: нужна реализация вне трёх запланированных бэкендов
     "rf-detr": False,
-    "rf-detr-m": True,
+    "rf-detr-m": False,
     "rf-detr-n": False,
     "rf-detr-s": False,
     "rf-detr-l": False,

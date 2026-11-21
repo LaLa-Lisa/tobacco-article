@@ -19,7 +19,6 @@ import uuid
 class BenchmarkConfig:
     warmup_frames: int = 30
     duration_s: float = 30.0
-    repetitions: int = 3
     input_rates: tuple[float, ...] = (10, 20, 30, 60, 300)
     direct: bool = True
     stream: bool = False
@@ -27,10 +26,8 @@ class BenchmarkConfig:
     memory_interval_s: float = 0.01
 
     def validate(self):
-        for name in ('warmup_frames', 'repetitions'):
-            value = getattr(self, name)
-            if type(value) is not int or value < 1:
-                raise ValueError(f'{name} must be a positive integer')
+        if type(self.warmup_frames) is not int or self.warmup_frames < 1:
+            raise ValueError('warmup_frames must be a positive integer')
         for name in ('duration_s', 'memory_interval_s'):
             positive(getattr(self, name), name)
         if not self.direct and not self.stream:
@@ -289,7 +286,7 @@ def load_runs(directory):
 
 
 def export_summary(directory):
-    rows = [{**{k: run[k] for k in ('model_id', 'device', 'mode', 'input_fps', 'repetition')},
+    rows = [{**{k: run[k] for k in ('model_id', 'device', 'mode', 'input_fps')},
              **run['summary']} for run in load_runs(directory)]
     write_json(Path(directory) / 'summary.json', rows)
     if rows:
@@ -305,13 +302,10 @@ def export_summary(directory):
 
 def make_schedule(config):
     rng = random.Random(config.seed)
-    schedule = []
-    for repetition in range(1, config.repetitions + 1):
-        if config.direct:
-            schedule.append((repetition, None))
-        rates = list(config.input_rates) if config.stream else []
-        rng.shuffle(rates)
-        schedule.extend((repetition, rate) for rate in rates)
+    schedule = [None] if config.direct else []
+    rates = list(config.input_rates) if config.stream else []
+    rng.shuffle(rates)
+    schedule.extend(rates)
     return schedule
 
 
@@ -354,7 +348,7 @@ def run_benchmarks(checkpoints, image_paths, *, devices=('cpu',), config=None,
     root = Path(output_root or cmn.ROOT / 'experiments' / 'benchmarks').resolve()
     directory = root / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ-') + uuid.uuid4().hex[:8])
     directory.mkdir(parents=True)
-    manifest = dict(schema_version=1, status='running', config=asdict(config), devices=devices,
+    manifest = dict(schema_version=2, status='running', config=asdict(config), devices=devices,
                     images=images, models=specs, skipped=skipped, notes=notes,
                     python_executable=sys.executable, completed_workers=[])
     write_json(directory / 'manifest.json', manifest)
