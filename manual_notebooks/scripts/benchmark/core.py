@@ -26,10 +26,20 @@ class BenchmarkConfig:
     stream: bool = False
     seed: int = 20261028
     memory_interval_s: float = 0.01
+    repeats: int = 1
+    memory_passes: int = 0
+    torch_num_threads: int | None = None
 
     def validate(self):
         if type(self.warmup_frames) is not int or self.warmup_frames < 1:
             raise ValueError('warmup_frames must be a positive integer')
+        for name, minimum in (('repeats', 1), ('memory_passes', 0)):
+            value = getattr(self, name)
+            if type(value) is not int or value < minimum:
+                raise ValueError(f'{name} must be an integer >= {minimum}')
+        if self.torch_num_threads is not None and (
+                type(self.torch_num_threads) is not int or self.torch_num_threads < 1):
+            raise ValueError('torch_num_threads must be a positive integer or None')
         for name in ('duration_s', 'memory_interval_s'):
             positive(getattr(self, name), name)
         if not self.direct and not self.stream:
@@ -150,7 +160,7 @@ class DeviceMetrics:
 class MemorySampler:
     """RSS рабочего процесса: выборочный пик, не точный максимум между отсчётами."""
 
-    def __init__(self, interval_s, read_rss=None):
+    def __init__(self, interval_s, read_rss=None, *, retain_records=True):
         positive(interval_s, 'memory_interval_s')
         if read_rss is None:
             import psutil
@@ -159,12 +169,26 @@ class MemorySampler:
         self.read_rss = read_rss
         self.interval = interval_s
         self.records = []
+        self.retain_records = retain_records
+        self.first = self.last = self.peak = None
+        self.sample_count = 0
+        self.max_gap_s = 0.0
         self.stop = threading.Event()
         self.error = None
         self.thread = threading.Thread(target=self._sample, daemon=True)
 
     def capture(self):
-        self.records.append(dict(timestamp=time.perf_counter(), rss_bytes=self.read_rss()))
+        record = dict(timestamp=time.perf_counter(), rss_bytes=self.read_rss())
+        if self.first is None:
+            self.first = record
+        if self.last is not None:
+            self.max_gap_s = max(self.max_gap_s, record['timestamp'] - self.last['timestamp'])
+        if self.peak is None or record['rss_bytes'] > self.peak['rss_bytes']:
+            self.peak = record
+        self.last = record
+        self.sample_count += 1
+        if self.retain_records:
+            self.records.append(record)
 
     def _sample(self):
         try:
@@ -201,18 +225,65 @@ def summarize(records, elapsed_s):
     return summary
 
 
+def measure_memory(predictor, images, metrics, config, *, options=None, prompts=None,
+                   sampler_factory=MemorySampler):
+    """Одинаковое число проходов по изображениям; память записей не растёт с FPS."""
+    metrics.reset()
+    warm_memory = metrics.memory()
+    sampler = sampler_factory(config.memory_interval_s, retain_records=False)
+    sampler.start()
+    try:
+        for _ in range(config.memory_passes):
+            for image in images:
+                result = predictor.predict(image, prompts=prompts, **(options or {}))
+                metrics.synchronize()
+                del result
+        peak_memory = metrics.memory(peak=True)
+    finally:
+        sampler.close()
+    summary = dict(rss_warm_bytes=sampler.first['rss_bytes'],
+                   rss_sampled_peak_bytes=sampler.peak['rss_bytes'])
+    summary.update({f'{key}_warm': value for key, value in warm_memory.items()})
+    summary.update({f'{key}_peak': value for key, value in peak_memory.items()})
+    return dict(scope='fixed_workload_direct', frames=len(images) * config.memory_passes,
+                image_count=len(images), passes=config.memory_passes,
+                sample_count=sampler.sample_count, max_sample_gap_s=sampler.max_gap_s,
+                first=sampler.first, last=sampler.last, peak=sampler.peak, summary=summary)
+
+
 def measure_run(predictor, images, metrics, config, *, input_fps=None,
                 options=None, prompts=None, sampler_factory=MemorySampler,
-                on_measurement_start=None):
+                on_measurement_start=None, on_memory_start=None):
     """Прогрев и отдельное окно измерения; объекты предсказаний не накапливаются."""
     config.validate()
     if not images:
         raise ValueError('Provide at least one image')
     options = options or {}
-    for index in range(config.warmup_frames):
-        result = predictor.predict(images[index % len(images)], prompts=prompts, **options)
-        metrics.synchronize()
-        del result
+
+    def warmup():
+        for index in range(max(config.warmup_frames, len(images))):
+            result = predictor.predict(images[index % len(images)], prompts=prompts, **options)
+            metrics.synchronize()
+            del result
+
+    def check_threads():
+        if config.torch_num_threads is not None and metrics.torch.get_num_threads() != config.torch_num_threads:
+            raise RuntimeError('Provider changed the requested PyTorch thread count during inference')
+
+    warmup()
+    # SDK может изменить число потоков при ленивой загрузке. Повторяем прогрев
+    # с запрошенным числом до прохода памяти и окна FPS.
+    if config.torch_num_threads is not None and metrics.torch.get_num_threads() != config.torch_num_threads:
+        metrics.torch.set_num_threads(config.torch_num_threads)
+        warmup()
+    check_threads()
+    memory_probe = None
+    if config.memory_passes:
+        if on_memory_start is not None:
+            on_memory_start()
+        memory_probe = measure_memory(predictor, images, metrics, config,
+                                      options=options, prompts=prompts)
+        check_threads()
     # Уведомление выполняется до сброса пиков памяти и начала измеряемого окна.
     if on_measurement_start is not None:
         on_measurement_start()
@@ -250,11 +321,14 @@ def measure_run(predictor, images, metrics, config, *, input_fps=None,
         if stream:
             stream.close()
         sampler.close()
+    check_threads()
     summary = summarize(records, final['timestamp'] - initial['timestamp'])
     summary.update(rss_warm_bytes=sampler.records[0]['rss_bytes'],
                    rss_sampled_peak_bytes=max(r['rss_bytes'] for r in sampler.records))
     summary.update({f'{key}_warm': value for key, value in warm_memory.items()})
     summary.update({f'{key}_peak': value for key, value in peak_memory.items()})
+    if memory_probe is not None:
+        summary.update({f'probe_{key}': value for key, value in memory_probe['summary'].items()})
     if stream:
         for name in ('generated', 'consumed', 'dropped'):
             summary[name] = final[name] - initial[name]
@@ -262,7 +336,7 @@ def measure_run(predictor, images, metrics, config, *, input_fps=None,
         summary['drop_rate'] = summary['dropped'] / summary['elapsed_s']
     return dict(mode='stream' if stream else 'direct', input_fps=input_fps,
                 initial=initial, final=final, records=records,
-                memory_records=sampler.records, summary=summary)
+                memory_records=sampler.records, memory_probe=memory_probe, summary=summary)
 
 
 def sha256(path):
@@ -271,6 +345,23 @@ def sha256(path):
         for chunk in iter(lambda: handle.read(1024 * 1024), b''):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def select_images(image_list, *, count=None, seed=20261028):
+    """Фиксированная выборка из явного списка; относительные пути — от списка."""
+    source = Path(image_list).resolve()
+    paths = [Path(line.strip()) for line in source.read_text(encoding='utf-8').splitlines()
+             if line.strip()]
+    paths = [(path if path.is_absolute() else source.parent / path).resolve() for path in paths]
+    if not paths or any(not path.is_file() for path in paths):
+        raise ValueError('Image list must contain existing files; relative paths are relative to the list')
+    if len(set(paths)) != len(paths):
+        raise ValueError('Image list must not contain duplicates')
+    if count is None:
+        return paths
+    if type(count) is not int or not 1 <= count <= len(paths):
+        raise ValueError(f'Image count must be an integer between 1 and {len(paths)}')
+    return random.Random(seed).sample(paths, count)
 
 
 def write_json(path, value):
@@ -293,6 +384,7 @@ def load_runs(directory):
 
 def export_summary(directory):
     rows = [{**{k: run[k] for k in ('model_id', 'device', 'mode', 'input_fps')},
+             'repeat': run.get('repeat'),
              **run['summary']} for run in load_runs(directory)]
     write_json(Path(directory) / 'summary.json', rows)
     if rows:
@@ -313,6 +405,18 @@ def make_schedule(config):
     rng.shuffle(rates)
     schedule.extend(rates)
     return schedule
+
+
+def make_jobs(specs, devices, config):
+    """Перемешивание внутри повторов; каждый режим запускается в свежем процессе."""
+    rng = random.Random(config.seed)
+    jobs = []
+    for repeat in range(1, config.repeats + 1):
+        block = [dict(model_id=item['spec']['id'], device=device, repeat=repeat, input_fps=rate)
+                 for item in specs for device in devices for rate in make_schedule(config)]
+        rng.shuffle(block)
+        jobs.extend(block)
+    return jobs
 
 
 def run_benchmarks(checkpoints, image_paths, *, devices=('cpu',), config=None,
@@ -348,16 +452,18 @@ def run_benchmarks(checkpoints, image_paths, *, devices=('cpu',), config=None,
             raise ValueError(f'Benchmark controls these options: {sorted(forbidden.intersection(options))}')
         item = asdict(spec)
         item['operations'] = sorted(spec.operations)
-        specs.append(dict(spec=item, checkpoint=str(path.resolve()), options=options,
+        specs.append(dict(spec=item, checkpoint=str(path.resolve()), checkpoint_sha256=sha256(path), options=options,
                           prompts=(prompts or {}).get(spec.id)))
     if not specs:
         raise ValueError('No enabled supported models to benchmark')
-    runs_per_worker = len(make_schedule(config))
+    jobs = make_jobs(specs, devices, config)
+    input_hashes = {path: sha256(path) for path in images}
     root = Path(output_root or cmn.ROOT / 'experiments' / 'benchmarks').resolve()
     directory = root / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ-') + uuid.uuid4().hex[:8])
     directory.mkdir(parents=True)
-    manifest = dict(schema_version=2, status='running', config=asdict(config), devices=devices,
+    manifest = dict(schema_version=3, status='running', config=asdict(config), devices=devices,
                     images=images, models=specs, skipped=skipped, notes=notes,
+                    input_hashes=input_hashes, jobs=jobs,
                     python_executable=sys.executable, completed_workers=[])
     write_json(directory / 'manifest.json', manifest)
     print(f'Benchmark directory: {directory}', flush=True)
@@ -365,35 +471,38 @@ def run_benchmarks(checkpoints, image_paths, *, devices=('cpu',), config=None,
     reporter = None
     try:
         if progress:
-            reporter = BenchmarkProgress(len(specs) * len(devices) * runs_per_worker)
-        for item in specs:
-            for device in devices:
-                worker_dir = directory / f"{item['spec']['id']}-{device.replace(':', '-')}"
-                worker_dir.mkdir()
-                payload = dict(item, device=device, images=images, config=asdict(config), notes=notes,
-                               progress=progress)
-                request = worker_dir / 'request.json'
-                write_json(request, payload)
-                print(f"Running {item['spec']['id']} on {device}; log: {worker_dir / 'worker.log'}", flush=True)
-                if reporter:
-                    reporter.start_worker(worker_dir, item['spec']['id'], device)
-                with (worker_dir / 'worker.log').open('w', encoding='utf-8') as log:
-                    environment = dict(os.environ, YOLO_CONFIG_DIR=str(cmn.YOLO_CONFIG_DIR))
-                    process = subprocess.Popen(
-                        [sys.executable, '-m', 'scripts.benchmark.worker', str(request)],
-                        cwd=Path(__file__).resolve().parents[2], env=environment,
-                        stdout=log, stderr=subprocess.STDOUT)
-                    while process.poll() is None:
-                        if reporter:
-                            reporter.refresh()
-                        time.sleep(1.0)
+            reporter = BenchmarkProgress(len(jobs))
+        by_id = {item['spec']['id']: item for item in specs}
+        for job_index, job in enumerate(jobs):
+            item, device = by_id[job['model_id']], job['device']
+            worker_dir = directory / f"{job_index:04d}-{job['model_id']}-{device.replace(':', '-')}-r{job['repeat']}"
+            worker_dir.mkdir()
+            payload = dict(item, device=device, images=images, config=asdict(config), notes=notes,
+                           progress=progress, repeat=job['repeat'], input_fps=job['input_fps'],
+                           input_hashes=input_hashes)
+            request = worker_dir / 'request.json'
+            write_json(request, payload)
+            print(f"Running {job['model_id']} on {device}, repeat {job['repeat']}; "
+                  f"log: {worker_dir / 'worker.log'}", flush=True)
+            if reporter:
+                reporter.start_worker(worker_dir, f"{job['model_id']} / repeat {job['repeat']}", device)
+            with (worker_dir / 'worker.log').open('w', encoding='utf-8') as log:
+                environment = dict(os.environ, YOLO_CONFIG_DIR=str(cmn.YOLO_CONFIG_DIR))
+                process = subprocess.Popen(
+                    [sys.executable, '-m', 'scripts.benchmark.worker', str(request)],
+                    cwd=Path(__file__).resolve().parents[2], env=environment,
+                    stdout=log, stderr=subprocess.STDOUT)
+                while process.poll() is None:
                     if reporter:
                         reporter.refresh()
-                    if process.returncode:
-                        raise RuntimeError(f'Benchmark worker failed; see {worker_dir / "worker.log"}')
-                manifest['completed_workers'].append(worker_dir.name)
-                write_json(directory / 'manifest.json', manifest)
-                export_summary(directory)
+                    time.sleep(1.0)
+                if reporter:
+                    reporter.refresh()
+                if process.returncode:
+                    raise RuntimeError(f'Benchmark worker failed; see {worker_dir / "worker.log"}')
+            manifest['completed_workers'].append(worker_dir.name)
+            write_json(directory / 'manifest.json', manifest)
+            export_summary(directory)
         manifest['status'] = 'completed'
     except BaseException as exc:
         manifest.update(status='interrupted' if isinstance(exc, KeyboardInterrupt) else 'failed',

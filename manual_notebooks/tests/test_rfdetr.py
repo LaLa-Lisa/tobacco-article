@@ -16,12 +16,22 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts import common as cmn
 from scripts.backends import get_backend
-from scripts.backends.rfdetr import RFDETRBackend
+from scripts.backends.rfdetr import RFDETRBackend, RFDETRPredictor
 from scripts.contracts import DatasetSpec, ModelArtifacts, TrainConfig, UnsupportedOperation
 from scripts.rfdetr_dataset import stage_dataset
 
 
 class RFDETRTest(unittest.TestCase):
+    def test_benchmark_metadata_reads_checkpoint_resolution_without_guessing_precision(self):
+        predictor = RFDETRPredictor(None, None, 'cpu')
+        self.assertIsNone(predictor.benchmark_metadata()['configured_input_size'])
+        predictor.model = SimpleNamespace(model_config=SimpleNamespace(resolution=384))
+        metadata = predictor.benchmark_metadata()
+        self.assertEqual(metadata['configured_input_size'], 384)
+        self.assertIsNone(metadata['precision'])
+        self.assertIsNone(metadata['actual_tensor_shape'])
+        json.dumps(metadata)
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)

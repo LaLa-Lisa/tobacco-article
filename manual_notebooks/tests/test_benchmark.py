@@ -13,7 +13,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.benchmark import core as bm
 from scripts import common as cmn
-from scripts.benchmark.plots import completion_fps_bins
+from scripts.benchmark.plots import completion_fps_bins, comparison_table, configuration_table
 from scripts.benchmark.progress import BenchmarkProgress
 
 
@@ -69,9 +69,46 @@ class BenchmarkTest(unittest.TestCase):
                        {'warmup_frames': 0}, {'warmup_frames': True},
                        {'memory_interval_s': -1}, {'input_rates': (0,)},
                        {'stream': True, 'input_rates': ()}, {'direct': False},
-                       {'input_rates': (10, 10)}):
+                       {'input_rates': (10, 10)}, {'repeats': 0}, {'repeats': True},
+                       {'memory_passes': -1}, {'memory_passes': 1.5},
+                       {'torch_num_threads': 0}, {'torch_num_threads': True}):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 bm.BenchmarkConfig(**kwargs).validate()
+
+    def test_image_selection_is_reproducible_and_resolves_from_list(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            names = [f'image-{index}.png' for index in range(10)]
+            for name in names:
+                (root / name).write_bytes(b'image')
+            source = root / 'images.txt'
+            source.write_text('\n'.join(names))
+            chosen = bm.select_images(source, count=4, seed=7)
+            self.assertEqual(chosen, bm.select_images(source, count=4, seed=7))
+            self.assertEqual(len(set(chosen)), 4)
+            self.assertTrue(all(path.parent == root for path in chosen))
+            self.assertEqual(bm.select_images(source), [root / name for name in names])
+            for count in (0, 11, True):
+                with self.assertRaises(ValueError):
+                    bm.select_images(source, count=count)
+            source.write_text(names[0] + '\n' + names[0])
+            with self.assertRaisesRegex(ValueError, 'duplicates'):
+                bm.select_images(source)
+            source.write_text('missing.png')
+            with self.assertRaisesRegex(ValueError, 'existing files'):
+                bm.select_images(source)
+
+    def test_jobs_have_every_repeat_model_device_and_rate_once(self):
+        specs = [{'spec': {'id': name}} for name in ('first', 'second')]
+        config = bm.BenchmarkConfig(repeats=3, stream=True, input_rates=(10, 30))
+        jobs = bm.make_jobs(specs, ['cpu', 'cuda:0'], config)
+        self.assertEqual(jobs, bm.make_jobs(specs, ['cpu', 'cuda:0'], config))
+        keys = [(j['model_id'], j['device'], j['repeat'], j['input_fps']) for j in jobs]
+        self.assertEqual(len(set(keys)), 36)
+        self.assertEqual([j['repeat'] for j in jobs], [1] * 12 + [2] * 12 + [3] * 12)
+        self.assertCountEqual(keys, [(name, device, repeat, rate)
+                                    for name in ('first', 'second') for device in ('cpu', 'cuda:0')
+                                    for repeat in (1, 2, 3) for rate in (None, 10, 30)])
 
     def test_schedule_reproducible_and_complete(self):
         config = bm.BenchmarkConfig(stream=True)
@@ -125,6 +162,105 @@ class BenchmarkTest(unittest.TestCase):
         sampler.close()
         self.assertEqual([r['rss_bytes'] for r in sampler.records], [100, 250])
         self.assertFalse(sampler.thread.is_alive())
+
+    def test_memory_probe_sampler_keeps_peak_without_growing_records(self):
+        sampler = bm.MemorySampler(.01, read_rss=Mock(side_effect=[100, 400, 200] * 1000),
+                                   retain_records=False)
+        with patch.object(bm.time, 'perf_counter', side_effect=range(3000)):
+            for _ in range(3000):
+                sampler.capture()
+        self.assertEqual(sampler.records, [])
+        self.assertEqual(sampler.sample_count, 3000)
+        self.assertEqual(sampler.first, dict(timestamp=0, rss_bytes=100))
+        self.assertEqual(sampler.last, dict(timestamp=2999, rss_bytes=200))
+        self.assertEqual(sampler.peak, dict(timestamp=1, rss_bytes=400))
+        self.assertEqual(sampler.max_gap_s, 1)
+
+    def test_memory_probe_visits_same_images_and_releases_results(self):
+        import weakref
+        references, seen = [], []
+
+        class Result:
+            pass
+
+        class Predictor:
+            def predict(self, image, **options):
+                self_outer.assertTrue(all(ref() is None for ref in references))
+                self_outer.assertEqual(options, dict(prompts=None, conf=.3))
+                seen.append(image)
+                result = Result()
+                references.append(weakref.ref(result))
+                return result
+
+        self_outer = self
+        metrics = Mock()
+        metrics.memory.side_effect = [dict(cuda_allocated_bytes=50, cuda_reserved_bytes=80),
+                                      dict(cuda_allocated_bytes=100, cuda_reserved_bytes=120)]
+        sampler = bm.MemorySampler(100, read_rss=Mock(side_effect=[200, 300]), retain_records=False)
+        factory = Mock(return_value=sampler)
+        probe = bm.measure_memory(Predictor(), ['a', 'b', 'c'], metrics,
+                                  bm.BenchmarkConfig(memory_passes=2), options={'conf': .3},
+                                  sampler_factory=factory)
+        self.assertEqual(seen, ['a', 'b', 'c'] * 2)
+        self.assertTrue(all(ref() is None for ref in references))
+        self.assertEqual(probe['frames'], 6)
+        self.assertEqual(probe['summary']['rss_sampled_peak_bytes'], 300)
+        self.assertEqual(probe['summary']['cuda_allocated_bytes_peak'], 100)
+        self.assertEqual(sampler.records, [])
+        self.assertFalse(sampler.thread.is_alive())
+        factory.assert_called_once_with(.01, retain_records=False)
+
+    def test_memory_probe_failure_closes_sampler(self):
+        predictor = Mock()
+        predictor.predict.side_effect = RuntimeError('failed')
+        sampler = Mock()
+        with self.assertRaisesRegex(RuntimeError, 'failed'):
+            bm.measure_memory(predictor, [object()], Mock(), bm.BenchmarkConfig(memory_passes=1),
+                              sampler_factory=Mock(return_value=sampler))
+        sampler.close.assert_called_once()
+
+    def test_all_images_warmed_before_separate_memory_probe(self):
+        events = []
+        predictor = Mock()
+        predictor.predict.side_effect = lambda image, **kw: events.append(image)
+        metrics = Mock()
+        metrics.memory.return_value = {}
+        sampler = Mock(records=[{'timestamp': 0, 'rss_bytes': 100}])
+
+        def probe(*args, **kwargs):
+            self.assertEqual(events, ['a', 'b', 'c', 'memory'])
+            return dict(summary={'rss_sampled_peak_bytes': 50})
+
+        with patch.object(bm, 'measure_memory', side_effect=probe), \
+             patch.object(bm.time, 'perf_counter', side_effect=[10, 10, 12, 12]):
+            run = bm.measure_run(predictor, ['a', 'b', 'c'], metrics,
+                                 bm.BenchmarkConfig(warmup_frames=1, duration_s=1, memory_passes=2),
+                                 sampler_factory=lambda _: sampler,
+                                 on_memory_start=lambda: events.append('memory'),
+                                 on_measurement_start=lambda: events.append('timing'))
+        self.assertEqual(events, ['a', 'b', 'c', 'memory', 'timing', 'a'])
+        self.assertEqual(run['summary']['probe_rss_sampled_peak_bytes'], 50)
+        self.assertEqual(run['summary']['rss_sampled_peak_bytes'], 100)
+
+    def test_thread_count_restored_after_lazy_provider_setup_and_rewarmed(self):
+        count = [1]
+        observed = []
+
+        def predict(*args, **kwargs):
+            if not observed:
+                count[0] = 8
+            observed.append(count[0])
+
+        metrics = Mock()
+        metrics.memory.return_value = {}
+        metrics.torch.get_num_threads.side_effect = lambda: count[0]
+        metrics.torch.set_num_threads.side_effect = lambda n: count.__setitem__(0, n)
+        sampler = Mock(records=[{'timestamp': 0, 'rss_bytes': 100}])
+        with patch.object(bm.time, 'perf_counter', side_effect=[10, 10, 12, 12]):
+            bm.measure_run(Mock(predict=Mock(side_effect=predict)), [object()], metrics,
+                           bm.BenchmarkConfig(warmup_frames=2, duration_s=1, torch_num_threads=1),
+                           sampler_factory=lambda _: sampler)
+        self.assertEqual(observed, [8, 8, 1, 1, 1])
 
     def test_device_synchronization_and_peak_api(self):
         cuda = Mock()
@@ -238,6 +374,74 @@ class BenchmarkTest(unittest.TestCase):
             bm.save_run(directory, 0, run)
             self.assertEqual(bm.load_runs(directory), [run])
             self.assertIn('42', (Path(directory) / 'summary.csv').read_text())
+
+    def test_repeat_summary_weights_runs_equally_and_keeps_memory_scopes_separate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for index, (fps, count) in enumerate(((10, 1), (30, 1000))):
+                bm.save_run(directory, index, dict(
+                    model_id='test', device='cpu', mode='direct', input_fps=None, repeat=index + 1,
+                    summary=dict(processing_fps=fps, processed=count,
+                                 rss_sampled_peak_bytes=2**20 * (index + 10),
+                                 probe_rss_sampled_peak_bytes=2**20 * (index + 1),
+                                 cuda_allocated_bytes_peak=None), records=[]))
+            table = comparison_table(directory).set_index('metric')
+            self.assertEqual(table.loc['processing_fps', 'n'], 2)
+            self.assertEqual(table.loc['processing_fps', 'median'], 20)
+            self.assertEqual(table.loc['processing_fps', 'q1'], 15)
+            self.assertEqual(table.loc['processing_fps', 'maximum'], 30)
+            self.assertEqual(table.loc['probe_rss_sampled_peak_mib', 'median'], 1.5)
+            self.assertEqual(table.loc['rss_sampled_peak_mib', 'median'], 10.5)
+            self.assertNotIn('cuda_allocated_mib_peak', table.index)
+            self.assertEqual(bm.load_runs(directory)[0]['repeat'], 1)
+
+    def test_configuration_table_preserves_unknown_runtime_fields(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            worker = root / 'worker'
+            worker.mkdir()
+            bm.write_json(root / 'manifest.json', dict(status='completed'))
+            bm.write_json(worker / 'manifest.json', dict(
+                model_id='rf-detr-m', device='cpu', backend='rfdetr', status='completed', repeat=2,
+                runtime=dict(configured_input_size=384, precision=None, actual_tensor_shape=None),
+                inputs=[{'shape': [100, 200, 3]}, {'shape': [100, 200, 3]}], torch_threads=1))
+            table = configuration_table(root)
+            self.assertEqual(len(table), 1)
+            self.assertEqual(table.iloc[0]['configured_input_size'], 384)
+            self.assertIsNone(table.iloc[0]['precision'])
+            self.assertIsNone(table.iloc[0]['actual_tensor_shape'])
+            self.assertEqual(table.iloc[0]['source_shapes'], [(100, 200, 3)])
+
+    def test_runner_launches_fresh_process_for_each_rate_and_repeat(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            checkpoint, image = root / 'weights.pt', root / 'image.png'
+            checkpoint.write_bytes(b'weights')
+            image.write_bytes(b'image')
+            requests = []
+
+            def started(command, **kwargs):
+                request = Path(command[-1])
+                payload = json.loads(request.read_text())
+                requests.append((request, payload))
+                self.assertEqual(payload['input_hashes'][str(image)], bm.sha256(image))
+                self.assertEqual(payload['checkpoint_sha256'], bm.sha256(checkpoint))
+                bm.save_run(request.parent, 0, dict(
+                    model_id='yolov8n', device=payload['device'],
+                    mode='direct' if payload['input_fps'] is None else 'stream',
+                    input_fps=payload['input_fps'], repeat=payload['repeat'],
+                    summary={'processing_fps': 1}, records=[]))
+                return Mock(returncode=0, poll=Mock(return_value=0))
+
+            with patch('scripts.workflows.enabled_specs', return_value=[cmn.MODELS_REGESTRY['yolov8n']]), \
+                 patch.object(bm.subprocess, 'Popen', side_effect=started):
+                output = bm.run_benchmarks(
+                    {'yolov8n': checkpoint}, [image], output_root=root / 'results', progress=False,
+                    config=bm.BenchmarkConfig(repeats=2, stream=True, input_rates=(30,)))
+            self.assertEqual(len({path.parent for path, _ in requests}), 4)
+            self.assertCountEqual([(p['repeat'], p['input_fps']) for _, p in requests],
+                                  [(1, None), (1, 30), (2, None), (2, 30)])
+            self.assertEqual(len(bm.load_runs(output)), 4)
+            self.assertEqual(json.loads((output / 'manifest.json').read_text())['status'], 'completed')
 
     def test_worker_failure_records_status_and_relay_configuration(self):
         with tempfile.TemporaryDirectory() as directory:

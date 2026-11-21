@@ -34,7 +34,7 @@ MODELS = {
     "yoloe": False,
 
     # Конкретные варианты детекторов из сравнений и рекомендаций.
-    "yolov8n": True,
+    "yolov8n": False,
     "yolov8s": False,
     "yolov12n": False,
     "yolo26n": True,

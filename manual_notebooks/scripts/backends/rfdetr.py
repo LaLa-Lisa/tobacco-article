@@ -145,6 +145,12 @@ class RFDETRPredictor:
         self.spec, self.artifacts, self.device = spec, artifacts, device
         self.model = None
 
+    def benchmark_metadata(self):
+        """Разрешение восстановлено из checkpoint; dtype не предполагается по умолчанию."""
+        config = getattr(self.model, 'model_config', None)
+        return dict(configured_input_size=getattr(config, 'resolution', None),
+                    rect=False, precision=None, actual_tensor_shape=None)
+
     def predict(self, image, *, prompts=None, **options):
         import numpy as np
         from PIL import Image

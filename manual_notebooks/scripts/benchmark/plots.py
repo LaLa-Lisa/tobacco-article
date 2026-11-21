@@ -1,5 +1,6 @@
 """Таблицы и графики сохранённых измерений; предсказания здесь не запускаются."""
 from pathlib import Path
+import json
 
 from .core import load_runs, positive
 from .measurement import MeasurementRun, MeasurementSeries, load_measurement_runs
@@ -120,12 +121,61 @@ def plot_latency_over_time(directory):
 def summary_table(directory):
     import pandas as pd
     rows = [{**{key: run[key] for key in ('model_id', 'device', 'mode', 'input_fps')},
+             'repeat': run.get('repeat'),
              **run['summary']} for run in load_runs(directory)]
     table = pd.DataFrame(rows)
     for key in list(table.columns):
         if 'bytes' in key:
             table[key.replace('bytes', 'mib')] = table.pop(key) / 2**20
     return table
+
+
+def comparison_table(directory):
+    """Повторы имеют одинаковый вес; диапазон не является доверительным интервалом."""
+    import pandas as pd
+    table = summary_table(directory)
+    if table.empty:
+        return pd.DataFrame()
+    keys = ['model_id', 'device', 'mode', 'input_fps']
+    metrics = ['processing_fps', 'prediction_ms_median', 'prediction_ms_p95',
+               'frame_latency_ms_p95', 'drop_rate', 'rss_sampled_peak_mib',
+               'cuda_allocated_mib_peak', 'cuda_reserved_mib_peak',
+               'probe_rss_warm_mib', 'probe_rss_sampled_peak_mib',
+               'probe_cuda_allocated_mib_peak', 'probe_cuda_reserved_mib_peak']
+    rows = []
+    for group, measurements in table.groupby(keys, dropna=False, sort=False):
+        for metric in metrics:
+            if metric not in measurements:
+                continue
+            values = measurements[metric].dropna()
+            if values.empty:
+                continue
+            rows.append(dict(zip(keys, group), metric=metric, n=len(values),
+                             median=values.median(), q1=values.quantile(.25), q3=values.quantile(.75),
+                             minimum=values.min(), maximum=values.max()))
+    return pd.DataFrame(rows)
+
+
+def configuration_table(directory):
+    """Показать реальные настройки SDK и входы; неизвестные значения не угадываются."""
+    import pandas as pd
+    rows = []
+    for path in sorted(Path(directory).rglob('manifest.json')):
+        manifest = json.loads(path.read_text(encoding='utf-8'))
+        if 'model_id' not in manifest:
+            continue
+        runtime = manifest.get('runtime', {})
+        shapes = sorted({tuple(item['shape']) for item in manifest.get('inputs', [])})
+        rows.append(dict(model_id=manifest['model_id'], device=manifest['device'],
+                         repeat=manifest.get('repeat'), backend=manifest['backend'],
+                         input_rates=manifest.get('schedule'),
+                         image_count=len(manifest.get('inputs', [])), source_shapes=shapes,
+                         configured_input_size=runtime.get('configured_input_size'),
+                         rect=runtime.get('rect'), precision=runtime.get('precision'),
+                         actual_tensor_shape=runtime.get('actual_tensor_shape'),
+                         torch_threads=manifest.get('torch_threads'),
+                         prediction_options=manifest.get('options'), status=manifest['status']))
+    return pd.DataFrame(rows)
 
 
 def plot_benchmarks(directory):
@@ -150,16 +200,24 @@ def plot_benchmarks(directory):
             if not len(values):
                 continue
             ax.scatter(index + (np.linspace(-0.05, 0.05, len(values)) if len(values) > 1 else 0), values, alpha=0.5)
+            median = np.median(values)
+            ax.errorbar(index, median, yerr=[[median - values.min()], [values.max() - median]],
+                        fmt='D', color='black', capsize=4)
         ax.set(xticks=range(len(keys)), xticklabels=labels, ylabel=label)
         ax.tick_params(axis='x', labelrotation=75)
-        ax.set_title('Measured values')
+        ax.set_title('Runs; median and min–max')
 
     for metrics in [
         [('processing_fps', 'Processing FPS', 1), ('prediction_ms_median', 'Median prediction (ms)', 1),
          ('prediction_ms_p95', 'P95 prediction (ms)', 1)],
-        [('rss_sampled_peak_bytes', 'Sampled peak process RSS (MiB)', 2**20),
-         ('cuda_allocated_bytes_peak', 'Peak CUDA allocated (MiB)', 2**20),
-         ('cuda_reserved_bytes_peak', 'Peak CUDA reserved (MiB)', 2**20)],
+        [('rss_sampled_peak_bytes', 'Timed window: peak RSS incl. records (MiB)', 2**20),
+         ('cuda_allocated_bytes_peak', 'Timed window: peak CUDA allocated (MiB)', 2**20),
+         ('cuda_reserved_bytes_peak', 'Timed window: peak CUDA reserved (MiB)', 2**20)],
+        *([
+            [('probe_rss_sampled_peak_bytes', 'Fixed workload: sampled peak RSS (MiB)', 2**20),
+             ('probe_cuda_allocated_bytes_peak', 'Fixed workload: peak CUDA allocated (MiB)', 2**20),
+             ('probe_cuda_reserved_bytes_peak', 'Fixed workload: peak CUDA reserved (MiB)', 2**20)]
+        ] if any(r.get('memory_probe') for r in runs) else []),
     ]:
         fig, axes = plt.subplots(1, len(metrics), figsize=(17, 6))
         for ax, (metric, label, scale) in zip(axes, metrics):

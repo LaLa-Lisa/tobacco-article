@@ -147,6 +147,16 @@ class UltralyticsPredictor:
         self.semantic = None
         self.semantic_options = None
 
+    def benchmark_metadata(self):
+        """Настройки загруженного SDK; imgsz не выдаётся за форму входного тензора."""
+        predictor = self.semantic if self.semantic is not None else getattr(self.model, 'predictor', None)
+        size = getattr(predictor, 'imgsz', None)
+        args = getattr(predictor, 'args', None)
+        fp16 = getattr(getattr(predictor, 'model', None), 'fp16', None)
+        return dict(configured_input_size=size, rect=getattr(args, 'rect', None),
+                    precision='float16' if fp16 is True else 'float32' if fp16 is False else None,
+                    actual_tensor_shape=None)
+
     def predict(self, image, *, prompts=None, **options):
         import numpy as np
 

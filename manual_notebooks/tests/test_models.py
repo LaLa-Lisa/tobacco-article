@@ -14,12 +14,24 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts import common as cmn, weight, workflows
 from scripts.backends import get_backend
-from scripts.backends.ultralytics import UltralyticsBackend, normalize_result
+from scripts.backends.ultralytics import UltralyticsBackend, UltralyticsPredictor, normalize_result
 from scripts.contracts import DatasetSpec, ModelArtifacts, TrainConfig, UnsupportedOperation
 from scripts.registry import validate_registry
 
 
 class ModelsTest(unittest.TestCase):
+    def test_benchmark_metadata_distinguishes_configured_size_from_tensor_shape(self):
+        predictor = UltralyticsPredictor(None, None, 'cpu')
+        self.assertIsNone(predictor.benchmark_metadata()['configured_input_size'])
+        predictor.model = SimpleNamespace(predictor=SimpleNamespace(
+            imgsz=[640, 640], args=SimpleNamespace(rect=True), model=SimpleNamespace(fp16=False)))
+        metadata = predictor.benchmark_metadata()
+        self.assertEqual(metadata['configured_input_size'], [640, 640])
+        self.assertEqual(metadata['precision'], 'float32')
+        self.assertTrue(metadata['rect'])
+        self.assertIsNone(metadata['actual_tensor_shape'])
+        json.dumps(metadata)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
