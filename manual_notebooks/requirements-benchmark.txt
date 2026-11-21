@@ -1,0 +1,6 @@
+# Дополнение к окружению выбранных провайдеров и Jupyter.
+numpy
+Pillow
+psutil>=5.9
+pandas
+matplotlib

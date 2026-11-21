@@ -1,0 +1,400 @@
+"""Измерение предсказаний и синтетического потока без зависимости от SDK провайдера."""
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
+import csv
+import hashlib
+import json
+import math
+import os
+from pathlib import Path
+import random
+import subprocess
+import sys
+import threading
+import time
+import uuid
+
+
+@dataclass(frozen=True)
+class BenchmarkConfig:
+    warmup_frames: int = 30
+    duration_s: float = 30.0
+    repetitions: int = 3
+    input_rates: tuple[float, ...] = (10, 20, 30, 60, 300)
+    direct: bool = True
+    stream: bool = False
+    seed: int = 20261028
+    memory_interval_s: float = 0.01
+
+    def validate(self):
+        for name in ('warmup_frames', 'repetitions'):
+            value = getattr(self, name)
+            if type(value) is not int or value < 1:
+                raise ValueError(f'{name} must be a positive integer')
+        for name in ('duration_s', 'memory_interval_s'):
+            positive(getattr(self, name), name)
+        if not self.direct and not self.stream:
+            raise ValueError('Enable at least one benchmark mode')
+        if self.stream and not self.input_rates:
+            raise ValueError('Stream mode requires input_rates')
+        for rate in self.input_rates:
+            positive(rate, 'input_fps')
+        if len(set(self.input_rates)) != len(self.input_rates):
+            raise ValueError('input_rates must be unique')
+
+
+def positive(value, name):
+    if isinstance(value, bool) or not math.isfinite(value) or value <= 0:
+        raise ValueError(f'{name} must be finite and positive')
+
+
+class LatestFrameStream:
+    """Очередь из одного кадра; непрочитанный кадр заменяется новым."""
+
+    def __init__(self, images, fps):
+        positive(fps, 'input_fps')
+        if not images:
+            raise ValueError('Provide at least one image')
+        self.images, self.fps = images, fps
+        self.condition = threading.Condition()
+        self.stop = threading.Event()
+        self.pending = None
+        self.error = None
+        self.generated = self.consumed = self.dropped = 0
+        self.thread = threading.Thread(target=self._produce, daemon=True)
+        self.thread.start()
+
+    def _publish(self, frame, generated_at):
+        with self.condition:
+            if self.stop.is_set():
+                return
+            self.generated += 1
+            if self.pending is not None:
+                self.dropped += 1
+            self.pending = (frame, self.generated, generated_at)
+            self.condition.notify_all()
+
+    def _produce(self):
+        try:
+            next_time = time.perf_counter()
+            index = 0
+            while not self.stop.wait(max(0, next_time - time.perf_counter())):
+                generated_at = time.perf_counter()
+                frame = self.images[index % len(self.images)].copy()
+                self._publish(frame, generated_at)
+                index += 1
+                next_time = max(next_time + 1 / self.fps, time.perf_counter())
+        except Exception as exc:
+            with self.condition:
+                self.error = exc
+                self.condition.notify_all()
+
+    def read(self):
+        with self.condition:
+            self.condition.wait_for(lambda: self.pending is not None or self.error or self.stop.is_set())
+            if self.error:
+                raise RuntimeError('Synthetic frame producer failed') from self.error
+            if self.stop.is_set():
+                raise StopIteration
+            value, self.pending = self.pending, None
+            self.consumed += 1
+            return value
+
+    def snapshot(self):
+        with self.condition:
+            return dict(timestamp=time.perf_counter(), generated=self.generated,
+                        consumed=self.consumed, dropped=self.dropped)
+
+    def close(self):
+        with self.condition:
+            self.stop.set()
+            self.condition.notify_all()
+        self.thread.join()
+
+
+class DeviceMetrics:
+    """Синхронизация и статистика аллокатора только выбранного устройства."""
+
+    def __init__(self, device):
+        import torch
+        self.torch = torch
+        parsed = torch.device(device)
+        if parsed.type not in {'cpu', 'cuda'}:
+            raise ValueError('Only cpu and cuda:N are supported')
+        if parsed.type == 'cuda':
+            if not torch.cuda.is_available():
+                raise RuntimeError(f'CUDA is unavailable: {device}')
+            parsed = torch.device('cuda', parsed.index if parsed.index is not None else 0)
+            torch.cuda.set_device(parsed)
+        self.device = str(parsed)
+        self.cuda = parsed.type == 'cuda'
+
+    def synchronize(self):
+        if self.cuda:
+            self.torch.cuda.synchronize(self.device)
+
+    def reset(self):
+        self.synchronize()
+        if self.cuda:
+            self.torch.cuda.reset_peak_memory_stats(self.device)
+
+    def memory(self, peak=False):
+        if not self.cuda:
+            return {'cuda_allocated_bytes': None, 'cuda_reserved_bytes': None}
+        api = self.torch.cuda
+        allocated = api.max_memory_allocated if peak else api.memory_allocated
+        reserved = api.max_memory_reserved if peak else api.memory_reserved
+        return dict(cuda_allocated_bytes=allocated(self.device),
+                    cuda_reserved_bytes=reserved(self.device))
+
+
+class MemorySampler:
+    """RSS рабочего процесса: выборочный пик, не точный максимум между отсчётами."""
+
+    def __init__(self, interval_s, read_rss=None):
+        positive(interval_s, 'memory_interval_s')
+        if read_rss is None:
+            import psutil
+            process = psutil.Process()
+            read_rss = lambda: process.memory_info().rss
+        self.read_rss = read_rss
+        self.interval = interval_s
+        self.records = []
+        self.stop = threading.Event()
+        self.error = None
+        self.thread = threading.Thread(target=self._sample, daemon=True)
+
+    def capture(self):
+        self.records.append(dict(timestamp=time.perf_counter(), rss_bytes=self.read_rss()))
+
+    def _sample(self):
+        try:
+            while not self.stop.wait(self.interval):
+                self.capture()
+        except Exception as exc:
+            self.error = exc
+
+    def start(self):
+        self.capture()
+        self.thread.start()
+
+    def close(self):
+        self.stop.set()
+        self.thread.join()
+        if self.error:
+            raise RuntimeError('Memory sampler failed') from self.error
+        self.capture()
+
+
+def summarize(records, elapsed_s):
+    import numpy as np
+    if not records:
+        raise ValueError('No completed predictions')
+    positive(elapsed_s, 'elapsed_s')
+    summary = dict(processed=len(records), elapsed_s=elapsed_s,
+                   processing_fps=len(records) / elapsed_s)
+    for key in ('prediction_ms', 'frame_latency_ms'):
+        values = [row[key] for row in records if row.get(key) is not None]
+        if values:
+            summary.update({f'{key}_{label}': float(value) for label, value in zip(
+                ('mean', 'median', 'p95', 'p99'),
+                (np.mean(values), *np.percentile(values, [50, 95, 99])))})
+    return summary
+
+
+def measure_run(predictor, images, metrics, config, *, input_fps=None,
+                options=None, prompts=None, sampler_factory=MemorySampler):
+    """Прогрев и отдельное окно измерения; объекты предсказаний не накапливаются."""
+    config.validate()
+    if not images:
+        raise ValueError('Provide at least one image')
+    options = options or {}
+    for index in range(config.warmup_frames):
+        result = predictor.predict(images[index % len(images)], prompts=prompts, **options)
+        metrics.synchronize()
+        del result
+    metrics.reset()
+    warm_memory = metrics.memory()
+    sampler = sampler_factory(config.memory_interval_s)
+    stream = None
+    records = []
+    sampler.start()
+    try:
+        stream = LatestFrameStream(images, input_fps) if input_fps is not None else None
+        initial = stream.snapshot() if stream else {'timestamp': time.perf_counter()}
+        while True:
+            if stream:
+                frame, frame_id, generated_at = stream.read()
+            else:
+                frame_id = len(records)
+                frame, generated_at = images[frame_id % len(images)], None
+            metrics.synchronize()
+            started = time.perf_counter()
+            result = predictor.predict(frame, prompts=prompts, **options)
+            metrics.synchronize()
+            completed = time.perf_counter()
+            del result
+            records.append(dict(frame_id=frame_id, generated_at=generated_at,
+                                started_at=started, completed_at=completed,
+                                prediction_ms=(completed - started) * 1000,
+                                frame_latency_ms=None if generated_at is None else
+                                (completed - generated_at) * 1000))
+            if completed - initial['timestamp'] >= config.duration_s:
+                break
+        final = stream.snapshot() if stream else {'timestamp': time.perf_counter()}
+        peak_memory = metrics.memory(peak=True)
+    finally:
+        if stream:
+            stream.close()
+        sampler.close()
+    summary = summarize(records, final['timestamp'] - initial['timestamp'])
+    summary.update(rss_warm_bytes=sampler.records[0]['rss_bytes'],
+                   rss_sampled_peak_bytes=max(r['rss_bytes'] for r in sampler.records))
+    summary.update({f'{key}_warm': value for key, value in warm_memory.items()})
+    summary.update({f'{key}_peak': value for key, value in peak_memory.items()})
+    if stream:
+        for name in ('generated', 'consumed', 'dropped'):
+            summary[name] = final[name] - initial[name]
+        summary['generation_fps'] = summary['generated'] / summary['elapsed_s']
+        summary['drop_rate'] = summary['dropped'] / summary['elapsed_s']
+    return dict(mode='stream' if stream else 'direct', input_fps=input_fps,
+                initial=initial, final=final, records=records,
+                memory_records=sampler.records, summary=summary)
+
+
+def sha256(path):
+    digest = hashlib.sha256()
+    with Path(path).open('rb') as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def write_json(path, value):
+    """Замена через временный файл не оставляет частично записанный JSON."""
+    path = Path(path)
+    temporary = path.with_suffix(path.suffix + '.tmp')
+    temporary.write_text(json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False), encoding='utf-8')
+    temporary.replace(path)
+
+
+def save_run(directory, index, run):
+    write_json(Path(directory) / f'run-{index:04d}.json', run)
+    export_summary(directory)
+
+
+def load_runs(directory):
+    return [json.loads(p.read_text(encoding='utf-8'))
+            for p in sorted(Path(directory).rglob('run-*.json'))]
+
+
+def export_summary(directory):
+    rows = [{**{k: run[k] for k in ('model_id', 'device', 'mode', 'input_fps', 'repetition')},
+             **run['summary']} for run in load_runs(directory)]
+    write_json(Path(directory) / 'summary.json', rows)
+    if rows:
+        keys = list(dict.fromkeys(key for row in rows for key in row))
+        path = Path(directory) / 'summary.csv'
+        temporary = path.with_suffix('.csv.tmp')
+        with temporary.open('w', newline='', encoding='utf-8') as handle:
+            writer = csv.DictWriter(handle, fieldnames=keys)
+            writer.writeheader()
+            writer.writerows(rows)
+        temporary.replace(path)
+
+
+def make_schedule(config):
+    rng = random.Random(config.seed)
+    schedule = []
+    for repetition in range(1, config.repetitions + 1):
+        if config.direct:
+            schedule.append((repetition, None))
+        rates = list(config.input_rates) if config.stream else []
+        rng.shuffle(rates)
+        schedule.extend((repetition, rate) for rate in rates)
+    return schedule
+
+
+def run_benchmarks(checkpoints, image_paths, *, devices=('cpu',), config=None,
+                   prediction_options=None, prompts=None, output_root=None, notes=''):
+    """Снимок MODELS и реестра передаётся свежему процессу для каждой пары модель/устройство."""
+    from . import common as cmn
+    from .workflows import enabled_specs
+    config = config or BenchmarkConfig()
+    config.validate()
+    devices = list(devices)
+    if not devices or len(set(devices)) != len(devices):
+        raise ValueError('Provide unique devices')
+    for device in devices:
+        if device != 'cpu' and not (device.startswith('cuda:') and device[5:].isdigit()):
+            raise ValueError('Use cpu or cuda:N explicitly')
+    images = [str(Path(p).resolve()) for p in image_paths]
+    if not images or any(not Path(p).is_file() for p in images):
+        raise FileNotFoundError('Provide existing benchmark images')
+    specs, skipped = [], {}
+    for spec in enabled_specs():
+        reason = spec.unavailable_reason('predict')
+        if reason:
+            skipped[spec.id] = reason
+            print(f'Skipped {spec.id}: {reason}')
+            continue
+        path = Path(checkpoints.get(spec.id, ''))
+        if not path.is_file() or path.stat().st_size == 0:
+            raise FileNotFoundError(f'Configure an existing nonempty checkpoint for {spec.id}: {path}')
+        options = dict((prediction_options or {}).get(spec.id, {}))
+        forbidden = {'batch', 'stream', 'source', 'device', 'save', 'show', 'save_txt', 'save_crop', 'save_conf', 'verbose'}
+        if forbidden.intersection(options):
+            raise ValueError(f'Benchmark controls these options: {sorted(forbidden.intersection(options))}')
+        item = asdict(spec)
+        item['operations'] = sorted(spec.operations)
+        specs.append(dict(spec=item, checkpoint=str(path.resolve()), options=options,
+                          prompts=(prompts or {}).get(spec.id)))
+    if not specs:
+        raise ValueError('No enabled supported models to benchmark')
+    root = Path(output_root or cmn.ROOT / 'experiments' / 'benchmarks').resolve()
+    directory = root / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ-') + uuid.uuid4().hex[:8])
+    directory.mkdir(parents=True)
+    manifest = dict(schema_version=1, status='running', config=asdict(config), devices=devices,
+                    images=images, models=specs, skipped=skipped, notes=notes,
+                    python_executable=sys.executable, completed_workers=[])
+    write_json(directory / 'manifest.json', manifest)
+    print(f'Benchmark directory: {directory}', flush=True)
+    process = None
+    try:
+        for item in specs:
+            for device in devices:
+                worker_dir = directory / f"{item['spec']['id']}-{device.replace(':', '-')}"
+                worker_dir.mkdir()
+                payload = dict(item, device=device, images=images, config=asdict(config), notes=notes)
+                request = worker_dir / 'request.json'
+                write_json(request, payload)
+                print(f"Running {item['spec']['id']} on {device}; log: {worker_dir / 'worker.log'}", flush=True)
+                with (worker_dir / 'worker.log').open('w', encoding='utf-8') as log:
+                    environment = dict(os.environ, YOLO_CONFIG_DIR=str(cmn.YOLO_CONFIG_DIR))
+                    process = subprocess.Popen(
+                        [sys.executable, '-m', 'scripts.benchmark_worker', str(request)],
+                        cwd=Path(__file__).resolve().parents[1], env=environment,
+                        stdout=log, stderr=subprocess.STDOUT)
+                    while process.poll() is None:
+                        time.sleep(0.2)
+                    if process.returncode:
+                        raise RuntimeError(f'Benchmark worker failed; see {worker_dir / "worker.log"}')
+                manifest['completed_workers'].append(worker_dir.name)
+                write_json(directory / 'manifest.json', manifest)
+                export_summary(directory)
+        manifest['status'] = 'completed'
+    except BaseException as exc:
+        manifest.update(status='interrupted' if isinstance(exc, KeyboardInterrupt) else 'failed',
+                        error=f'{type(exc).__name__}: {exc}')
+        raise
+    finally:
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+        export_summary(directory)
+        write_json(directory / 'manifest.json', manifest)
+    return directory

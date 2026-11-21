@@ -10,6 +10,7 @@ __pycache__/
 data/*
 !data/README.md
 experiments/reproductions/
+experiments/benchmarks/
 experiments/.matplotlib/
 experiments/.ultralytics/
 experiments/results/masks/*
