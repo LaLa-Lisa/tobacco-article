@@ -13,7 +13,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.benchmark import core as bm
 from scripts import common as cmn
-from scripts.benchmark.plots import completion_fps_bins, comparison_table, configuration_table
+from scripts.benchmark.plots import completion_fps_bins, configuration_table, summary_table
 from scripts.benchmark.progress import BenchmarkProgress
 
 
@@ -69,7 +69,7 @@ class BenchmarkTest(unittest.TestCase):
                        {'warmup_frames': 0}, {'warmup_frames': True},
                        {'memory_interval_s': -1}, {'input_rates': (0,)},
                        {'stream': True, 'input_rates': ()}, {'direct': False},
-                       {'input_rates': (10, 10)}, {'repeats': 0}, {'repeats': True},
+                       {'input_rates': (10, 10)},
                        {'memory_passes': -1}, {'memory_passes': 1.5},
                        {'torch_num_threads': 0}, {'torch_num_threads': True}):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
@@ -98,17 +98,15 @@ class BenchmarkTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'existing files'):
                 bm.select_images(source)
 
-    def test_jobs_have_every_repeat_model_device_and_rate_once(self):
+    def test_jobs_have_every_model_device_and_rate_once(self):
         specs = [{'spec': {'id': name}} for name in ('first', 'second')]
-        config = bm.BenchmarkConfig(repeats=3, stream=True, input_rates=(10, 30))
+        config = bm.BenchmarkConfig(stream=True, input_rates=(10, 30))
         jobs = bm.make_jobs(specs, ['cpu', 'cuda:0'], config)
         self.assertEqual(jobs, bm.make_jobs(specs, ['cpu', 'cuda:0'], config))
-        keys = [(j['model_id'], j['device'], j['repeat'], j['input_fps']) for j in jobs]
-        self.assertEqual(len(set(keys)), 36)
-        self.assertEqual([j['repeat'] for j in jobs], [1] * 12 + [2] * 12 + [3] * 12)
-        self.assertCountEqual(keys, [(name, device, repeat, rate)
+        keys = [(j['model_id'], j['device'], j['input_fps']) for j in jobs]
+        self.assertCountEqual(keys, [(name, device, rate)
                                     for name in ('first', 'second') for device in ('cpu', 'cuda:0')
-                                    for repeat in (1, 2, 3) for rate in (None, 10, 30)])
+                                    for rate in (None, 10, 30)])
 
     def test_schedule_reproducible_and_complete(self):
         config = bm.BenchmarkConfig(stream=True)
@@ -375,24 +373,15 @@ class BenchmarkTest(unittest.TestCase):
             self.assertEqual(bm.load_runs(directory), [run])
             self.assertIn('42', (Path(directory) / 'summary.csv').read_text())
 
-    def test_repeat_summary_weights_runs_equally_and_keeps_memory_scopes_separate(self):
+    def test_summary_table_keeps_memory_scopes_separate(self):
         with tempfile.TemporaryDirectory() as directory:
-            for index, (fps, count) in enumerate(((10, 1), (30, 1000))):
-                bm.save_run(directory, index, dict(
-                    model_id='test', device='cpu', mode='direct', input_fps=None, repeat=index + 1,
-                    summary=dict(processing_fps=fps, processed=count,
-                                 rss_sampled_peak_bytes=2**20 * (index + 10),
-                                 probe_rss_sampled_peak_bytes=2**20 * (index + 1),
-                                 cuda_allocated_bytes_peak=None), records=[]))
-            table = comparison_table(directory).set_index('metric')
-            self.assertEqual(table.loc['processing_fps', 'n'], 2)
-            self.assertEqual(table.loc['processing_fps', 'median'], 20)
-            self.assertEqual(table.loc['processing_fps', 'q1'], 15)
-            self.assertEqual(table.loc['processing_fps', 'maximum'], 30)
-            self.assertEqual(table.loc['probe_rss_sampled_peak_mib', 'median'], 1.5)
-            self.assertEqual(table.loc['rss_sampled_peak_mib', 'median'], 10.5)
-            self.assertNotIn('cuda_allocated_mib_peak', table.index)
-            self.assertEqual(bm.load_runs(directory)[0]['repeat'], 1)
+            bm.save_run(directory, 0, dict(
+                model_id='test', device='cpu', mode='direct', input_fps=None,
+                summary=dict(rss_sampled_peak_bytes=10 * 2**20,
+                             probe_rss_sampled_peak_bytes=2**20), records=[]))
+            row = summary_table(directory).iloc[0]
+            self.assertEqual(row['rss_sampled_peak_mib'], 10)
+            self.assertEqual(row['probe_rss_sampled_peak_mib'], 1)
 
     def test_configuration_table_preserves_unknown_runtime_fields(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -401,7 +390,7 @@ class BenchmarkTest(unittest.TestCase):
             worker.mkdir()
             bm.write_json(root / 'manifest.json', dict(status='completed'))
             bm.write_json(worker / 'manifest.json', dict(
-                model_id='rf-detr-m', device='cpu', backend='rfdetr', status='completed', repeat=2,
+                model_id='rf-detr-m', device='cpu', backend='rfdetr', status='completed',
                 runtime=dict(configured_input_size=384, precision=None, actual_tensor_shape=None),
                 inputs=[{'shape': [100, 200, 3]}, {'shape': [100, 200, 3]}], torch_threads=1))
             table = configuration_table(root)
@@ -411,7 +400,7 @@ class BenchmarkTest(unittest.TestCase):
             self.assertIsNone(table.iloc[0]['actual_tensor_shape'])
             self.assertEqual(table.iloc[0]['source_shapes'], [(100, 200, 3)])
 
-    def test_runner_launches_fresh_process_for_each_rate_and_repeat(self):
+    def test_runner_launches_fresh_process_for_each_mode_and_rate(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             checkpoint, image = root / 'weights.pt', root / 'image.png'
@@ -428,7 +417,7 @@ class BenchmarkTest(unittest.TestCase):
                 bm.save_run(request.parent, 0, dict(
                     model_id='yolov8n', device=payload['device'],
                     mode='direct' if payload['input_fps'] is None else 'stream',
-                    input_fps=payload['input_fps'], repeat=payload['repeat'],
+                    input_fps=payload['input_fps'],
                     summary={'processing_fps': 1}, records=[]))
                 return Mock(returncode=0, poll=Mock(return_value=0))
 
@@ -436,11 +425,10 @@ class BenchmarkTest(unittest.TestCase):
                  patch.object(bm.subprocess, 'Popen', side_effect=started):
                 output = bm.run_benchmarks(
                     {'yolov8n': checkpoint}, [image], output_root=root / 'results', progress=False,
-                    config=bm.BenchmarkConfig(repeats=2, stream=True, input_rates=(30,)))
-            self.assertEqual(len({path.parent for path, _ in requests}), 4)
-            self.assertCountEqual([(p['repeat'], p['input_fps']) for _, p in requests],
-                                  [(1, None), (1, 30), (2, None), (2, 30)])
-            self.assertEqual(len(bm.load_runs(output)), 4)
+                    config=bm.BenchmarkConfig(stream=True, input_rates=(30,)))
+            self.assertEqual(len({path.parent for path, _ in requests}), 2)
+            self.assertCountEqual([p['input_fps'] for _, p in requests], [None, 30])
+            self.assertEqual(len(bm.load_runs(output)), 2)
             self.assertEqual(json.loads((output / 'manifest.json').read_text())['status'], 'completed')
 
     def test_worker_failure_records_status_and_relay_configuration(self):

@@ -1,5 +1,5 @@
 """Измерение предсказаний и синтетического потока без зависимости от SDK провайдера."""
-from dataclasses import asdict, dataclass
+from dataclasses import KW_ONLY, asdict, dataclass
 from datetime import datetime, timezone
 import csv
 import hashlib
@@ -26,17 +26,15 @@ class BenchmarkConfig:
     stream: bool = False
     seed: int = 20261028
     memory_interval_s: float = 0.01
-    repeats: int = 1
+    _: KW_ONLY
     memory_passes: int = 0
     torch_num_threads: int | None = None
 
     def validate(self):
         if type(self.warmup_frames) is not int or self.warmup_frames < 1:
             raise ValueError('warmup_frames must be a positive integer')
-        for name, minimum in (('repeats', 1), ('memory_passes', 0)):
-            value = getattr(self, name)
-            if type(value) is not int or value < minimum:
-                raise ValueError(f'{name} must be an integer >= {minimum}')
+        if type(self.memory_passes) is not int or self.memory_passes < 0:
+            raise ValueError('memory_passes must be a nonnegative integer')
         if self.torch_num_threads is not None and (
                 type(self.torch_num_threads) is not int or self.torch_num_threads < 1):
             raise ValueError('torch_num_threads must be a positive integer or None')
@@ -384,7 +382,6 @@ def load_runs(directory):
 
 def export_summary(directory):
     rows = [{**{k: run[k] for k in ('model_id', 'device', 'mode', 'input_fps')},
-             'repeat': run.get('repeat'),
              **run['summary']} for run in load_runs(directory)]
     write_json(Path(directory) / 'summary.json', rows)
     if rows:
@@ -408,14 +405,11 @@ def make_schedule(config):
 
 
 def make_jobs(specs, devices, config):
-    """Перемешивание внутри повторов; каждый режим запускается в свежем процессе."""
-    rng = random.Random(config.seed)
-    jobs = []
-    for repeat in range(1, config.repeats + 1):
-        block = [dict(model_id=item['spec']['id'], device=device, repeat=repeat, input_fps=rate)
-                 for item in specs for device in devices for rate in make_schedule(config)]
-        rng.shuffle(block)
-        jobs.extend(block)
+    """Одно задание на каждую комбинацию модели, устройства и входной частоты."""
+    schedule = make_schedule(config)
+    jobs = [dict(model_id=item['spec']['id'], device=device, input_fps=rate)
+            for item in specs for device in devices for rate in schedule]
+    random.Random(config.seed).shuffle(jobs)
     return jobs
 
 
@@ -461,7 +455,7 @@ def run_benchmarks(checkpoints, image_paths, *, devices=('cpu',), config=None,
     root = Path(output_root or cmn.ROOT / 'experiments' / 'benchmarks').resolve()
     directory = root / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ-') + uuid.uuid4().hex[:8])
     directory.mkdir(parents=True)
-    manifest = dict(schema_version=3, status='running', config=asdict(config), devices=devices,
+    manifest = dict(schema_version=4, status='running', config=asdict(config), devices=devices,
                     images=images, models=specs, skipped=skipped, notes=notes,
                     input_hashes=input_hashes, jobs=jobs,
                     python_executable=sys.executable, completed_workers=[])
@@ -475,17 +469,17 @@ def run_benchmarks(checkpoints, image_paths, *, devices=('cpu',), config=None,
         by_id = {item['spec']['id']: item for item in specs}
         for job_index, job in enumerate(jobs):
             item, device = by_id[job['model_id']], job['device']
-            worker_dir = directory / f"{job_index:04d}-{job['model_id']}-{device.replace(':', '-')}-r{job['repeat']}"
+            worker_dir = directory / f"{job_index:04d}-{job['model_id']}-{device.replace(':', '-')}"
             worker_dir.mkdir()
             payload = dict(item, device=device, images=images, config=asdict(config), notes=notes,
-                           progress=progress, repeat=job['repeat'], input_fps=job['input_fps'],
+                           progress=progress, input_fps=job['input_fps'],
                            input_hashes=input_hashes)
             request = worker_dir / 'request.json'
             write_json(request, payload)
-            print(f"Running {job['model_id']} on {device}, repeat {job['repeat']}; "
+            print(f"Running {job['model_id']} on {device}; "
                   f"log: {worker_dir / 'worker.log'}", flush=True)
             if reporter:
-                reporter.start_worker(worker_dir, f"{job['model_id']} / repeat {job['repeat']}", device)
+                reporter.start_worker(worker_dir, job['model_id'], device)
             with (worker_dir / 'worker.log').open('w', encoding='utf-8') as log:
                 environment = dict(os.environ, YOLO_CONFIG_DIR=str(cmn.YOLO_CONFIG_DIR))
                 process = subprocess.Popen(

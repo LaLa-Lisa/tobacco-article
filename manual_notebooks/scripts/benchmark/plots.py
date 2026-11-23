@@ -121,39 +121,12 @@ def plot_latency_over_time(directory):
 def summary_table(directory):
     import pandas as pd
     rows = [{**{key: run[key] for key in ('model_id', 'device', 'mode', 'input_fps')},
-             'repeat': run.get('repeat'),
              **run['summary']} for run in load_runs(directory)]
     table = pd.DataFrame(rows)
     for key in list(table.columns):
         if 'bytes' in key:
             table[key.replace('bytes', 'mib')] = table.pop(key) / 2**20
     return table
-
-
-def comparison_table(directory):
-    """Повторы имеют одинаковый вес; диапазон не является доверительным интервалом."""
-    import pandas as pd
-    table = summary_table(directory)
-    if table.empty:
-        return pd.DataFrame()
-    keys = ['model_id', 'device', 'mode', 'input_fps']
-    metrics = ['processing_fps', 'prediction_ms_median', 'prediction_ms_p95',
-               'frame_latency_ms_p95', 'drop_rate', 'rss_sampled_peak_mib',
-               'cuda_allocated_mib_peak', 'cuda_reserved_mib_peak',
-               'probe_rss_warm_mib', 'probe_rss_sampled_peak_mib',
-               'probe_cuda_allocated_mib_peak', 'probe_cuda_reserved_mib_peak']
-    rows = []
-    for group, measurements in table.groupby(keys, dropna=False, sort=False):
-        for metric in metrics:
-            if metric not in measurements:
-                continue
-            values = measurements[metric].dropna()
-            if values.empty:
-                continue
-            rows.append(dict(zip(keys, group), metric=metric, n=len(values),
-                             median=values.median(), q1=values.quantile(.25), q3=values.quantile(.75),
-                             minimum=values.min(), maximum=values.max()))
-    return pd.DataFrame(rows)
 
 
 def configuration_table(directory):
@@ -167,7 +140,7 @@ def configuration_table(directory):
         runtime = manifest.get('runtime', {})
         shapes = sorted({tuple(item['shape']) for item in manifest.get('inputs', [])})
         rows.append(dict(model_id=manifest['model_id'], device=manifest['device'],
-                         repeat=manifest.get('repeat'), backend=manifest['backend'],
+                         backend=manifest['backend'],
                          input_rates=manifest.get('schedule'),
                          image_count=len(manifest.get('inputs', [])), source_shapes=shapes,
                          configured_input_size=runtime.get('configured_input_size'),
@@ -186,26 +159,16 @@ def plot_benchmarks(directory):
     if not runs:
         print('No completed runs found')
         return
-    groups = {}
-    for run in runs:
-        key = (run['model_id'], run['device'], run['mode'], run['input_fps'])
-        groups.setdefault(key, []).append(run)
-    keys = list(groups)
-    labels = [' / '.join(str(v) for v in key if v is not None) for key in keys]
+    keys = ('model_id', 'device', 'mode', 'input_fps')
+    labels = [' / '.join(str(run[k]) for k in keys if run[k] is not None) for run in runs]
 
     def comparison(ax, metric, label, scale=1):
-        for index, key in enumerate(keys):
-            values = [r['summary'].get(metric) for r in groups[key]]
-            values = np.array([v / scale for v in values if v is not None])
-            if not len(values):
-                continue
-            ax.scatter(index + (np.linspace(-0.05, 0.05, len(values)) if len(values) > 1 else 0), values, alpha=0.5)
-            median = np.median(values)
-            ax.errorbar(index, median, yerr=[[median - values.min()], [values.max() - median]],
-                        fmt='D', color='black', capsize=4)
-        ax.set(xticks=range(len(keys)), xticklabels=labels, ylabel=label)
+        for index, run in enumerate(runs):
+            value = run['summary'].get(metric)
+            if value is not None:
+                ax.scatter(index, value / scale)
+        ax.set(xticks=range(len(runs)), xticklabels=labels, ylabel=label)
         ax.tick_params(axis='x', labelrotation=75)
-        ax.set_title('Runs; median and min–max')
 
     for metrics in [
         [('processing_fps', 'Processing FPS', 1), ('prediction_ms_median', 'Median prediction (ms)', 1),

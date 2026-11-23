@@ -50,9 +50,9 @@ def run_worker(request):
     checkpoint_hash = sha256(payload['checkpoint'])
     if payload.get('checkpoint_sha256', checkpoint_hash) != checkpoint_hash:
         raise ValueError('Benchmark checkpoint changed after preflight')
-    manifest = dict(schema_version=3, status='running', model_id=spec.id, device=metrics.device,
+    manifest = dict(schema_version=4, status='running', model_id=spec.id, device=metrics.device,
                     backend=spec.backend, checkpoint=payload['checkpoint'],
-                    checkpoint_sha256=checkpoint_hash, inputs=inputs, repeat=payload.get('repeat'),
+                    checkpoint_sha256=checkpoint_hash, inputs=inputs,
                     config=asdict(config), options=payload['options'], prompts=payload['prompts'],
                     notes=payload['notes'], platform=platform.platform(), processor=platform.processor(),
                     python=platform.python_version(), packages=packages,
@@ -92,7 +92,7 @@ def run_worker(request):
                             cudnn_benchmark=torch.backends.cudnn.benchmark,
                             cudnn_allow_tf32=torch.backends.cudnn.allow_tf32,
                             cuda_matmul_allow_tf32=torch.backends.cuda.matmul.allow_tf32)
-            run.update(model_id=spec.id, device=metrics.device, repeat=payload.get('repeat'))
+            run.update(model_id=spec.id, device=metrics.device)
             run['summary']['rss_baseline_bytes'] = manifest['rss_baseline_bytes']
             save_run(directory, index, run)
             report('Saved', completed=index + 1)

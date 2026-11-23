@@ -127,7 +127,6 @@ class MeasurementRun:
     device: str = ''
     mode: str = 'direct'
     input_fps: float | None = None
-    repeat: int | None = None
     records: tuple[Mapping[str, object], ...] = field(default=(), repr=False)
     include_end: bool = True
 
@@ -155,7 +154,7 @@ class MeasurementRun:
         records = tuple(run['records'])
         return cls(completed_at=tuple(row['completed_at'] - origin for row in records),
                    end_s=end - origin, records=records,
-                   **{key: run[key] for key in ('model_id', 'device', 'mode', 'input_fps', 'repeat') if key in run})
+                   **{key: run[key] for key in ('model_id', 'device', 'mode', 'input_fps') if key in run})
 
     @property
     def duration_s(self) -> float:
@@ -171,8 +170,6 @@ class MeasurementRun:
         parts = [self.model_id, self.device, self.mode]
         if self.input_fps is not None:
             parts.append(f'input {self.input_fps:g} FPS')
-        if self.repeat is not None:
-            parts.append(f'repeat {self.repeat}')
         return ' / '.join(part for part in parts if part)
 
     def slice(self, start: float, end: float) -> MeasurementRun:
