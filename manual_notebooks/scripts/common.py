@@ -42,8 +42,9 @@ MODELS = {
     "yolo26m": False,
 
     # Альтернативные детекторы.
-    "rtmdet": False,  # Отключено: бэкенд mmdetection запланирован, но пока не реализован
-    "rtmdet-x": False,  # Отключено: бэкенд mmdetection запланирован, но пока не реализован
+    "rtmdet-tiny": False,
+    "rtmdet": False,  # Отключено: для MMDetection реализован вариант rtmdet-tiny
+    "rtmdet-x": False,  # Отключено: для MMDetection реализован вариант rtmdet-tiny
     "rt-detr": False,
     "rt-detrv2": False,  # Отключено: нужна реализация вне трёх запланированных бэкендов
     "rt-detrv2-s": False,  # Отключено: нужна реализация вне трёх запланированных бэкендов
@@ -56,7 +57,7 @@ MODELS = {
     "rf-detr-n": False,
     "rf-detr-s": False,
     "rf-detr-l": False,
-    "faster-rcnn": False,  # Отключено: бэкенд mmdetection запланирован, но пока не реализован
+    "faster-rcnn": False,  # Отключено: для MMDetection реализован вариант rtmdet-tiny
 
     # Сегментация экземпляров и семантическая сегментация.
     "yolov8-seg": False,
@@ -65,7 +66,7 @@ MODELS = {
     "yolo11n-seg": False,
     "yolo11m-seg": False,
     "yolo26-seg": False,
-    "rtmdet-ins": False,  # Отключено: бэкенд mmdetection запланирован, но пока не реализован
+    "rtmdet-ins": False,  # Отключено: для MMDetection реализован вариант rtmdet-tiny
     "rf-detr-seg": False,
     "rf-detr-seg-n": False,
     "rf-detr-seg-s": False,

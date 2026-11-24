@@ -6,6 +6,9 @@ def get_backend(spec: ModelSpec):
     if spec.backend == "ultralytics":
         from .ultralytics import UltralyticsBackend
         return UltralyticsBackend()
+    if spec.backend == "mmdetection" and spec.operations:
+        from .mmdetection import MMDetectionBackend
+        return MMDetectionBackend()
     if spec.backend == "rfdetr":
         from .rfdetr import RFDETRBackend
         return RFDETRBackend()

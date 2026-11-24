@@ -45,10 +45,14 @@ for name, checkpoint, task, constructor, operations in [
 ]:
     MODELS_REGESTRY[name] = ModelSpec(name, "ultralytics", task, constructor, checkpoint, operations)
 
+MODELS_REGESTRY["rtmdet-tiny"] = ModelSpec(
+    "rtmdet-tiny", "mmdetection", "detect", "rtmdet_tiny_8xb32-300e_coco",
+    "rtmdet_tiny_8xb32-300e_coco_20220902_112414-78e30dcc.pth", FULL)
+
 _add("rtmdet rtmdet-x faster-rcnn", backend="mmdetection", constructor=None,
-     operations=frozenset(), note="Disabled: future mmdetection backend is not implemented")
+     operations=frozenset(), note="Disabled: this MMDetection variant is not implemented")
 _add("rtmdet-ins", backend="mmdetection", task="segment", constructor=None,
-     operations=frozenset(), note="Disabled: future mmdetection backend is not implemented")
+     operations=frozenset(), note="Disabled: this MMDetection variant is not implemented")
 _add("rf-detr", backend="rfdetr", constructor=None)
 _add("rf-detr-seg", backend="rfdetr", task="segment", constructor=None)
 for suffix, size in [("n", "Nano"), ("s", "Small"), ("m", "Medium"), ("l", "Large")]:

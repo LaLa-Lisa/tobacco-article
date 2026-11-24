@@ -41,7 +41,7 @@ def run_worker(request):
         images.append(array)
         inputs.append(dict(path=path, sha256=checksum, shape=list(array.shape)))
     packages = {}
-    for name in ('torch', 'torchvision', 'ultralytics', 'rfdetr', 'numpy', 'psutil', 'Pillow'):
+    for name in ('torch', 'torchvision', 'ultralytics', 'rfdetr', 'mmdet', 'mmengine', 'mmcv', 'numpy', 'psutil', 'Pillow'):
         try:
             packages[name] = importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError:
@@ -50,8 +50,13 @@ def run_worker(request):
     checkpoint_hash = sha256(payload['checkpoint'])
     if payload.get('checkpoint_sha256', checkpoint_hash) != checkpoint_hash:
         raise ValueError('Benchmark checkpoint changed after preflight')
+    model_config = Path(payload['model_config']) if payload.get('model_config') else None
+    if model_config and sha256(model_config) != payload['model_config_sha256']:
+        raise ValueError('Benchmark model configuration changed after preflight')
+    artifacts = ModelArtifacts(Path(payload['checkpoint']), model_config)
     manifest = dict(schema_version=4, status='running', model_id=spec.id, device=metrics.device,
                     backend=spec.backend, checkpoint=payload['checkpoint'],
+                    model_config=payload.get('model_config'), model_config_sha256=payload.get('model_config_sha256'),
                     checkpoint_sha256=checkpoint_hash, inputs=inputs,
                     config=asdict(config), options=payload['options'], prompts=payload['prompts'],
                     notes=payload['notes'], platform=platform.platform(), processor=platform.processor(),
@@ -70,7 +75,7 @@ def run_worker(request):
                     schedule=[payload['input_fps']] if 'input_fps' in payload else make_schedule(config))
     write_json(directory / 'manifest.json', manifest)
     try:
-        predictor = load_model(spec.id, ModelArtifacts(Path(payload['checkpoint'])), device=metrics.device)
+        predictor = load_model(spec.id, artifacts, device=metrics.device)
         for index, rate in enumerate(manifest['schedule']):
             def report(stage, completed=index):
                 if payload.get('progress', False):

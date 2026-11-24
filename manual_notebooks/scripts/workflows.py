@@ -2,6 +2,7 @@
 from dataclasses import dataclass, field
 
 from . import common as cmn
+from .artifacts import trained_artifacts
 from .backends import get_backend
 from .contracts import DatasetSpec, ModelArtifacts, TrainConfig, TrainingRun, UnsupportedOperation
 
@@ -20,16 +21,16 @@ def enabled_specs():
 def train_models(dataset: DatasetSpec, config: TrainConfig | None = None) -> TrainingBatch:
     """Обучить включённые модели без сохранённых обученных весов.
 
-    Существующие weights/trained/<model-id>.pt и неподдерживаемые модели пропускаются.
+    Модели с готовыми обученными артефактами и неподдерживаемые модели пропускаются.
     Некорректные данные и непредвиденные ошибки провайдера останавливают выполнение.
     Описания завершённых запусков остаются на диске при сбое следующей модели.
     """
     batch = TrainingBatch()
     config = config or TrainConfig()
     for spec in enabled_specs():
-        trained = cmn.TRAINED_WEIGHTS_DIR / f"{spec.id}.pt"
-        if trained.is_file():
-            reason = f"Trained weights already exist: {trained}"
+        trained = trained_artifacts(spec)
+        if trained is not None:
+            reason = f"Trained weights already exist: {trained.checkpoint}"
             batch.skipped[spec.id] = reason
             print(f"Skipped {spec.id}: {reason}")
             continue

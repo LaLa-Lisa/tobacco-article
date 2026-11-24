@@ -422,6 +422,7 @@ def run_benchmarks(checkpoints, image_paths, *, devices=('cpu',), config=None,
                    progress=True):
     """Снимок MODELS и реестра передаётся свежему процессу для каждой пары модель/устройство."""
     from .. import common as cmn
+    from ..artifacts import resolve_artifacts
     from ..workflows import enabled_specs
     config = config or BenchmarkConfig()
     config.validate()
@@ -441,7 +442,11 @@ def run_benchmarks(checkpoints, image_paths, *, devices=('cpu',), config=None,
             skipped[spec.id] = reason
             print(f'Skipped {spec.id}: {reason}')
             continue
-        path = Path(checkpoints.get(spec.id, ''))
+        artifacts = resolve_artifacts(spec, checkpoints.get(spec.id, ''))
+        path = artifacts.checkpoint
+        model_config = artifacts.config
+        if model_config and not (model_config.is_file() and model_config.stat().st_size):
+            raise FileNotFoundError(f'Missing model configuration for {spec.id}: {model_config}')
         if not path.is_file() or path.stat().st_size == 0:
             raise FileNotFoundError(f'Configure an existing nonempty checkpoint for {spec.id}: {path}')
         options = dict((prediction_options or {}).get(spec.id, {}))
@@ -451,6 +456,8 @@ def run_benchmarks(checkpoints, image_paths, *, devices=('cpu',), config=None,
         item = asdict(spec)
         item['operations'] = sorted(spec.operations)
         specs.append(dict(spec=item, checkpoint=str(path.resolve()), checkpoint_sha256=sha256(path), options=options,
+                          model_config=str(model_config.resolve()) if model_config else None,
+                          model_config_sha256=sha256(model_config) if model_config else None,
                           prompts=(prompts or {}).get(spec.id)))
     if not specs:
         raise ValueError('No enabled supported models to benchmark')

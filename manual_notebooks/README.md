@@ -36,7 +36,7 @@ cmn.MODELS["rt-detr"] = True
 Исходные веса сохраняют имя файла провайдера, а копии обученных весов
 для удобной загрузки используют `<local-model-id>.pt`.
 
-Бэкенд RF-DETR реализован; MMDetection пока зарезервирован.
+MMDetection поддерживает детектор `rtmdet-tiny`.
 Модели из других репозиториев отключены и снабжены комментариями. Проверка
 наличия весов доступна без импорта Ultralytics. До начала скачивания проверяется
 весь список: неподдерживаемые модели и семейства без конкретного варианта
@@ -78,6 +78,63 @@ results = predictor.predict("image.jpg", imgsz=640, conf=0.25)
 идентификаторы и названия классов, а при наличии — булевы маски в координатах
 исходного изображения. `result.native` сохраняет исходный результат Ultralytics
 и средства визуализации. Обученные веса не подменяются предобученными автоматически.
+
+## MMDetection и RTMDet-Tiny
+
+Для Linux x86-64 с CPU проверено отдельное окружение Python 3.11. Из корня репозитория:
+
+```bash
+python3.11 -m venv .venv-mmdetection
+source .venv-mmdetection/bin/activate
+python -m pip install torch==2.1.0 torchvision==0.16.0 --index-url https://download.pytorch.org/whl/cpu
+python -m pip install --only-binary=mmcv --find-links https://download.openmmlab.com/mmcv/dist/cpu/torch2.1/index.html -r manual_notebooks/requirements-mmdetection.txt
+python -m pip install jupyterlab -r manual_notebooks/scripts/benchmark/requirements.txt
+python -m jupyterlab
+```
+
+Для CUDA выберите совместимые сборки PyTorch, torchvision и MMCV с операторами для той же версии CUDA. [Инструкция MMDetection](https://mmdetection.readthedocs.io/en/v3.3.0/get_started.html)
+
+В ядре этого окружения выберите детектор перед скачиванием:
+
+```python
+from scripts import common as cmn
+from scripts.backends import get_backend
+from scripts.contracts import DatasetSpec, TrainConfig
+from scripts.workflows import train_models, load_model
+
+cmn.MODELS.update(dict.fromkeys(cmn.MODELS, False))
+cmn.MODELS["rtmdet-tiny"] = True
+spec = cmn.MODELS_REGESTRY["rtmdet-tiny"]
+initial = get_backend(spec).download(spec)
+batch = train_models(DatasetSpec(cmn.DATA_YAML), TrainConfig(epochs=1, device="cpu"))
+```
+
+Адаптер берёт конфигурацию из пакета MMDetection 3.3.0 и сохраняет её рядом с исходными весами.
+В каталоге запуска находятся `config.py`, COCO JSON каждой исходной выборки, лучшие и последние веса,
+а также манифест с контрольными суммами исходных данных и метриками валидации.
+Пилот использует постоянный learning rate из исходного конфига, масштабирование с сохранением пропорций,
+дополнение до квадрата и случайное горизонтальное отражение при обучении. Размер входа кратен 32.
+Лучшая эпоха выбирается по `coco/bbox_mAP` на val. Параметр `num_workers` задаётся в
+`backend_options["mmdetection"]`. Устройства задаются как `cpu` или `cuda:N`.
+
+```python
+from scripts.artifacts import trained_artifacts
+
+artifacts = trained_artifacts(spec)  # Указатель на лучшую эпоху последнего успешного запуска
+predictor = load_model(spec.id, artifacts, device="cpu")
+predictions = predictor.predict(cmn.DATASET_PATH / "images/image_000001.png", conf=0.25)
+CHECKPOINTS = {spec.id: artifacts}  # Для run_benchmarks в fps_measure.ipynb
+```
+
+Указатель `weights/trained/rtmdet-tiny.json` содержит пути к паре файлов в каталоге запуска.
+Повторный вызов `train_models` пропускает готовую пару. Для отдельного эксперимента вызовите
+`get_backend(spec).train(spec, initial, dataset, config)` и используйте `run.best_artifacts` или
+`run.last_artifacts`. Прежние каталоги запусков сохраняются.
+
+Проверка на CPU выполнена с Python 3.11.14, PyTorch 2.1.0+cpu, torchvision 0.16.0+cpu,
+MMCV 2.1.0, MMEngine 0.10.7 и MMDetection 3.3.0. На синтетических изображениях проверены
+скачивание, одна эпоха обучения, загрузка лучшей эпохи, три типа входного изображения и отдельный процесс измерения FPS.
+Качество детекции табака и производительность на полевых данных требуют отдельных экспериментов.
 
 ## Предсказание по подсказкам
 

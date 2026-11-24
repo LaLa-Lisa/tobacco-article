@@ -1,0 +1,9 @@
+# Установите PyTorch, torchvision и сборку MMCV для нужного устройства по README.
+torch==2.1.0
+torchvision==0.16.0
+mmcv==2.1.0
+mmengine==0.10.7
+mmdet==3.3.0
+numpy<2
+yapf==0.40.1
+setuptools<81

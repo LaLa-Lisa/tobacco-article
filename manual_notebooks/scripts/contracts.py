@@ -19,8 +19,10 @@ class ModelSpec:
     note: str = ""
 
     def unavailable_reason(self, operation: str) -> str | None:
-        if self.backend not in {"ultralytics", "rfdetr"}:
+        if self.backend not in {"ultralytics", "rfdetr", "mmdetection"}:
             return self.note or f"Backend {self.backend!r} is not implemented"
+        if not self.operations and self.note:
+            return self.note
         if not self.checkpoint:
             return "Requires a concrete variant/checkpoint in MODELS_REGESTRY"
         if operation not in self.operations:

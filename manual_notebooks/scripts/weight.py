@@ -1,5 +1,6 @@
 """Проверка и скачивание весов по реестру моделей для ручных ноутбуков."""
 from . import common as cmn
+from .artifacts import ready, resolve_artifacts, trained_artifacts
 from .backends import get_backend
 from .workflows import enabled_specs
 
@@ -10,11 +11,11 @@ def weight_status():
     rows = []
     for spec in enabled_specs():
         original = cmn.ORIGINAL_WEIGHTS_DIR / spec.checkpoint if spec.checkpoint else None
-        trained = cmn.TRAINED_WEIGHTS_DIR / f"{spec.id}.pt"
+        trained = trained_artifacts(spec)
         rows.append({"model": spec.id, "backend": spec.backend or "outside scope", "task": spec.task,
                      "status": spec.unavailable_reason("download") or "Ready",
-                     "original": bool(original and original.is_file() and original.stat().st_size),
-                     "trained": trained.is_file(), "checkpoint": spec.checkpoint or "variant required"})
+                     "original": bool(original and ready(resolve_artifacts(spec, original))),
+                     "trained": trained is not None, "checkpoint": spec.checkpoint or "variant required"})
     return rows
 
 
@@ -57,7 +58,7 @@ def download_weights(*, return_paths=False):
 
     for spec in specs:
         path = cmn.ORIGINAL_WEIGHTS_DIR / spec.checkpoint
-        existed = path.is_file() and path.stat().st_size > 0
+        existed = ready(resolve_artifacts(spec, path))
         rows[spec.id]["status"] = "Already exists" if existed else "Downloading…"
         refresh()
         try:
