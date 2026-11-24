@@ -14,7 +14,7 @@ from pycocotools import mask as mask_api
 
 
 ROOT = Path(__file__).resolve().parents[1]
-FOLDER = ROOT / 'dataset_notebooks_simple'
+FOLDER = Path(__file__).resolve().parent
 
 
 def definitions(name):
@@ -280,7 +280,7 @@ def check_reference_prompt():
         must_raise(ValueError, normalize, invalid, (480, 352))
 
     class FakeModel:
-        def _encode_prompt(self, backbone_out, find_input, geometric_prompt):
+        def _encode_prompt(self, backbone_out, find_input, geometric_prompt, encode_text=True):
             assert find_input == 'find stage'
             assert backbone_out['image'].name == 'reference'
             return ('encoded reference', geometric_prompt, backbone_out)
@@ -385,12 +385,101 @@ def check_reference_prompt():
     print('PASS: reference transfer, text and weed prompts, filtering, and adapter cleanup')
 
 
+def check_yolo_reference_prompts(temp):
+    import hashlib
+    import random
+    import torch
+    from types import SimpleNamespace
+
+    labeling = definitions('04_create_labels.ipynb')
+    sample = labeling['sample_yolo_references']
+    dataset = temp / 'reference-yolo'
+    (dataset / 'images/train').mkdir(parents=True)
+    (dataset / 'labels/train').mkdir(parents=True)
+    for index in range(3):
+        Image.new('RGB', (100, 80), color=(index, 0, 0)).save(
+            dataset / 'images/train' / f'{index}.png')
+        (dataset / 'labels/train' / f'{index}.txt').write_text(
+            '0 0.5 0.5 0.4 0.25\n1 0.5 0.5 0.2 0.2\n0 0.9 0.5 0.2000000000000001 1\n',
+            encoding='utf-8')
+    (dataset / 'images/train/0.npy').write_bytes(b'ignored sidecar')
+    random_state = random.getstate()
+    references = sample(dataset, 5, 42)
+    assert random.getstate() == random_state
+    assert references == sample(dataset, 5, 42)
+    assert references != sample(dataset, 5, 43)
+    assert len({(item['label'], item['line_number']) for item in references}) == 5
+    assert {item['class_id'] for item in references} == {0}
+    for item in references:
+        assert item['image_size'] == [100, 80]
+        assert item['image_sha256'] == hashlib.sha256(Path(item['image']).read_bytes()).hexdigest()
+        assert item['label_sha256'] == hashlib.sha256(Path(item['label']).read_bytes()).hexdigest()
+        expected = [30, 30, 40, 20] if item['line_number'] == 1 else [80, 0, 20, 80]
+        assert np.allclose(item['box_xywh'], expected)
+    assert len(sample(dataset, 3, 42, 1)) == 3
+    json.dumps(references)
+    for invalid in (0, -1, 1.5, True):
+        must_raise(ValueError, sample, dataset, invalid, 42)
+    must_raise(ValueError, sample, dataset, 7, 42)
+    must_raise(ValueError, sample, dataset, 1, 42, 2)
+    must_raise(FileNotFoundError, sample, temp / 'missing-yolo', 1, 42)
+
+    class ReferenceProcessor:
+        def __init__(self):
+            self.calls = []
+            self.model = SimpleNamespace(_encode_prompt=self.encode)
+            self.find_stage = 'find stage'
+
+        def set_image(self, image):
+            return {'backbone_out': {'pixel': image.getpixel((0, 0))[0]}}
+
+        def add_geometric_prompt(self, state, box, label):
+            assert label is True
+            state['geometric_prompt'] = box
+            return state
+
+        def encode(self, backbone_out, find_input, geometric_prompt, encode_text):
+            self.calls.append((backbone_out['pixel'], geometric_prompt, encode_text))
+            length = 3 if encode_text else 1
+            return (torch.full((length, 1, 4), float(backbone_out['pixel'])),
+                    torch.zeros((1, length), dtype=torch.bool), backbone_out)
+
+    processor = ReferenceProcessor()
+    prompts, masks = labeling['encode_reference_prompts'](processor, references)
+    assert prompts.shape == (7, 1, 4) and masks.shape == (1, 7)
+    assert masks.dtype == torch.bool and not masks.any()
+    assert [call[2] for call in processor.calls] == [True, False, False, False, False]
+    offset = 0
+    for item, (pixel, box, encode_text) in zip(references, processor.calls):
+        assert pixel == int(Path(item['image']).stem)
+        assert np.allclose(box, item['box_cxcywh_normalized'])
+        length = 3 if encode_text else 1
+        assert torch.all(prompts[offset:offset + length] == pixel)
+        offset += length
+    single_prompt, single_mask = labeling['encode_reference_prompts'](processor, references[:1])
+    assert single_prompt.shape == (3, 1, 4) and single_mask.shape == (1, 3)
+    must_raise(ValueError, labeling['encode_reference_prompts'], processor, [])
+
+    invalid_label = dataset / 'labels/train/invalid.txt'
+    for line in ('0 0.5 0.5 0.2', '0 nan 0.5 0.2 0.2',
+                 '0 0.5 0.5 0 0.2', '0 0.99 0.5 0.2 0.2'):
+        invalid_label.write_text(line, encoding='utf-8')
+        must_raise(ValueError, sample, dataset, 1, 42)
+    invalid_label.write_text('0 0.5 0.5 0.2 0.2', encoding='utf-8')
+    must_raise(FileNotFoundError, sample, dataset, 1, 42)
+    invalid_label.unlink()
+    Image.new('RGB', (100, 80)).save(dataset / 'images/train/0.jpg')
+    must_raise(ValueError, sample, dataset, 1, 42)
+    print('PASS: seeded YOLO sampling, conversion, provenance, validation, and multi-image prompts')
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix='tobacco-dataset-validation-') as directory:
         temp = Path(directory)
         check_defaults(temp)
         check_checkpoint_loading()
         check_reference_prompt()
+        check_yolo_reference_prompts(temp)
         migration = check_migration(temp)
         check_labels(temp, migration)
 

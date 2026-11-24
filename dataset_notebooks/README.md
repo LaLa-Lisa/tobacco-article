@@ -125,12 +125,21 @@ state. Disable their execution flags when inspecting them without processing.
    box file, including an empty file if no tobacco was detected. A train/val/test
    split must be created separately before using the data to train YOLO.
    Labeling is opt-in: set `RUN_LABELING = True` and choose a fresh `RUN_NAME`.
-   For tobacco, `PROMPT_MODE = 'reference_box'` uses the same reference image and
+   For tobacco, the default `PROMPT_MODE = 'yolo_boxes'` randomly samples five
+   class-0 boxes from `data/tobacco_yolo/`. Set `YOLO_REFERENCE_DATASET`,
+   `REFERENCE_BOX_COUNT`, `REFERENCE_SEED`, and `REFERENCE_CLASS_ID` to customize
+   this reproducible sample without replacement. Each box is encoded using its
+   own source image; the combined prompt is reused across all target images.
+   Sampling includes all labels in the directory, not just a train split; use a
+   training-only reference directory for held-out evaluation. Cross-image prompt
+   transfer remains experimental and needs visual review.
+   `PROMPT_MODE = 'reference_box'` uses the same reference image and
    pixel box as notebook 6; set `REFERENCE_IMAGE` and `REFERENCE_BOX_XYWH` to your
    chosen example. Use `PROMPT_MODE = 'text'` to use `TOBACCO_PROMPT` instead.
    Weed predictions for binary masks remain text-prompted. A progress bar shows
    completed images and estimated time remaining. Configuration records the prompt
-   mode and reference image hash and box, or the tobacco text prompt.
+   mode and reference image hash and box, or the tobacco text prompt. YOLO mode
+   also records the seed, source annotation paths, line numbers, and label hashes.
 
 To inspect a completed labeled run, open `05_review_dataset.ipynb`, set `DATASET`
 and `IMAGE_NUMBER`, enable `RUN_REVIEW`, and run the notebook. It displays the
