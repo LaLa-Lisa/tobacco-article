@@ -124,8 +124,18 @@ state. Disable their execution flags when inspecting them without processing.
    tobacco-only YOLO detection boxes in `labels/` (class 0). Each image has a
    box file, including an empty file if no tobacco was detected. A train/val/test
    split must be created separately before using the data to train YOLO.
-   Labeling is opt-in: set `RUN_LABELING = True` and choose a fresh `RUN_NAME`.
-   For tobacco, the default `PROMPT_MODE = 'yolo_boxes'` randomly samples five
+   First set `RUN_PREVIEW = True`, then run the separate reference-selection,
+   model-preparation, and preview cells. `PREVIEW_IMAGE_NUMBERS` defaults to 1–9,
+   matching the current display loop in notebook 05. Images come directly from
+   `MIGRATION`; no existing label run is needed. Preview shows the original image,
+   masks with per-instance SAM scores, and proposed semantic labels, without
+   writing files. Original three-class weed regions have no SAM confidence.
+   Scores are model outputs, not calibrated probabilities of correctness.
+   If satisfied, set `RUN_LABELING = True` in the **final cell only**, choose a
+   fresh `RUN_NAME`, and run that cell. It reuses the exact prepared references
+   and model, without resampling or reloading. Changed inference settings require
+   preparation and preview again. Both execution flags default to false.
+   For tobacco, the default `PROMPT_MODE = 'yolo_boxes'` randomly samples three
    class-0 boxes from `data/tobacco_yolo/`. Set `YOLO_REFERENCE_DATASET`,
    `REFERENCE_BOX_COUNT`, `REFERENCE_SEED`, and `REFERENCE_CLASS_ID` to customize
    this reproducible sample without replacement. Each box is encoded using its

@@ -34,7 +34,7 @@ def check_defaults(temp):
     os.environ['JUPYTER_PATH'] = str(temp / 'share/jupyter')
     install(prefix=str(temp), kernel_name='tobacco-dataset-validation')
     for name, flag in (('03_migrate_dataset.ipynb', 'RUN_MIGRATION'),
-                       ('04_create_labels.ipynb', 'RUN_LABELING'),
+                       ('04_create_labels.ipynb', 'RUN_PREVIEW'),
                        ('05_review_dataset.ipynb', 'RUN_REVIEW'),
                        ('06_inspect_sam3_predictions.ipynb', 'RUN_INFERENCE')):
         notebook = nbformat.read(FOLDER / name, as_version=4)
@@ -44,6 +44,9 @@ def check_defaults(temp):
         if len(configuration) != 1:
             raise ValueError(f'Expected one configuration cell in {name}')
         configuration[0].source += f'\n{flag} = False\n'
+        if name == '04_create_labels.ipynb':
+            notebook.cells[-1].source = notebook.cells[-1].source.replace(
+                'RUN_LABELING = True', 'RUN_LABELING = False')
         NotebookClient(notebook, timeout=120, kernel_name='tobacco-dataset-validation',
                        resources={'metadata': {'path': str(FOLDER)}}).execute()
         print(f'PASS: {name} runs with its workflow disabled')
@@ -243,6 +246,117 @@ def check_labels(temp, migration):
     print('PASS: overlap, instances, COCO RLE, YOLO boxes and fake-inference integration')
 
 
+def check_preview(temp, migration):
+    import contextlib
+    import copy
+    import io
+    from types import SimpleNamespace
+    from unittest.mock import Mock, patch
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    labeling = definitions('04_create_labels.ipynb')
+    shape = (6, 8)
+    tobacco = np.zeros(shape, dtype=bool)
+    tobacco[1:3, 2:5] = True
+    weed = np.ones(shape, dtype=bool)
+    calls = []
+
+    def predict(processor, image, mask_type, threshold):
+        assert processor == 'prepared processor' and threshold == 0.5
+        calls.append(mask_type)
+        return [(0.875, tobacco)], [(0.625, weed)] if mask_type == 'binary' else []
+
+    manifest = labeling['load_migration_manifest'](migration)
+    binary = next(record for record in manifest['images'] if record['mask_type'] == 'binary')
+    three_class = next(record for record in manifest['images'] if record['mask_type'] == 'three_class')
+    numbers = [three_class['id'], binary['id']]
+    before = {path: path.read_bytes() for path in temp.rglob('*') if path.is_file()}
+    results = list(labeling['preview_examples'](migration, numbers, 'prepared processor', predict, 0.5))
+    assert [record['id'] for record, *_ in results] == numbers
+    assert calls == ['three_class', 'binary']
+    for record, image, semantic, instances in results:
+        original = np.asarray(Image.open(migration / 'source_masks' / record['file_name']))
+        expected, _ = labeling['assemble_labels'](shape, [(0.875, tobacco)], [(0.625, weed)],
+            original if record['mask_type'] == 'three_class' else None)
+        assert np.array_equal(semantic, expected)
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            figure = labeling['plot_prediction_preview'](record, image, semantic, instances)
+        assert output.getvalue() == ''
+        assert len(figure.axes) == 1
+        axis = figure.axes[0]
+        assert [text.get_text() for text in axis.texts] == ['0.875']
+        assert axis.get_title() == '' and axis.get_legend() is None
+        assert not axis.axison
+        assert len(axis.images) == 2
+        assert np.array_equal(axis.images[0].get_array(), image)
+        assert np.array_equal(axis.images[1].get_array()[..., 3] > 0, tobacco)
+        assert len(axis.patches) == 1
+        box = axis.patches[0]
+        assert box.get_xy() == (1.5, 0.5)
+        assert box.get_width() == 3 and box.get_height() == 2
+        plt.close(figure)
+    empty = list(labeling['preview_examples'](
+        migration, [binary['id']], None, lambda *args: ([], []), 0.5))[0]
+    assert not empty[2].any() and not empty[3]
+    with contextlib.redirect_stdout(io.StringIO()) as output:
+        figure = labeling['plot_prediction_preview'](*empty)
+    assert output.getvalue() == ''
+    assert len(figure.axes) == 1
+    assert not figure.axes[0].texts and not figure.axes[0].patches
+    assert not figure.axes[0].images[1].get_array()[..., 3].any()
+    plt.close(figure)
+    for invalid in ([], [0], [True], [1.5]):
+        must_raise(ValueError, list, labeling['preview_examples'](migration, invalid, None, predict, 0.5))
+    must_raise(FileNotFoundError, list,
+               labeling['preview_examples'](migration, [999999], None, predict, 0.5))
+    after = {path: path.read_bytes() for path in temp.rglob('*') if path.is_file()}
+    assert before == after
+
+    notebook = json.loads((FOLDER / '04_create_labels.ipynb').read_text(encoding='utf-8'))
+    label_source = ''.join(notebook['cells'][-1]['source']).replace('RUN_LABELING = False', 'RUN_LABELING = True')
+    current = {'confidence': 0.5, 'references': ['selected box']}
+    namespace = {'preview_completed': False, 'prepared_settings': copy.deepcopy(current),
+                 'inference_settings': lambda: current, 'new_run': Mock(return_value=temp / 'not-written'),
+                 'generate_dataset': Mock(return_value={'images': []}),
+                 'torch': SimpleNamespace(inference_mode=contextlib.nullcontext,
+                                         autocast=lambda *args, **kwargs: contextlib.nullcontext(),
+                                         bfloat16=None),
+                 'ROOT': temp, 'RUN_NAME': 'preview-test', 'MIGRATION': migration,
+                 'processor': 'prepared processor', 'predict': predict, 'config': current}
+    must_raise(RuntimeError, exec, label_source, namespace)
+    namespace['preview_completed'] = True
+    current['confidence'] = 0.7
+    must_raise(RuntimeError, exec, label_source, namespace)
+    namespace['new_run'].assert_not_called()
+    namespace['generate_dataset'].assert_not_called()
+    current['confidence'] = 0.5
+    current['references'] = ['different box']
+    must_raise(RuntimeError, exec, label_source, namespace)
+    current['references'] = ['selected box']
+    namespace.update(RUN_PREVIEW=True, PREVIEW_IMAGE_NUMBERS=numbers,
+                     CONFIDENCE=0.5, preview_examples=labeling['preview_examples'],
+                     plot_prediction_preview=labeling['plot_prediction_preview'])
+    preview_source = ''.join(notebook['cells'][-3]['source'])
+    with patch.object(plt, 'show') as show, contextlib.redirect_stdout(io.StringIO()) as output:
+        exec(preview_source, namespace)
+    assert output.getvalue() == ''
+    assert show.call_count == len(numbers)
+    assert namespace['preview_completed'] is True
+    namespace['new_run'].assert_not_called()
+    namespace['generate_dataset'].assert_not_called()
+    namespace['PREVIEW_IMAGE_NUMBERS'] = [999999]
+    must_raise(FileNotFoundError, exec, preview_source, namespace)
+    assert namespace['preview_completed'] is False
+    must_raise(RuntimeError, exec, label_source, namespace)
+    namespace['preview_completed'] = True
+    exec(label_source, namespace)
+    namespace['generate_dataset'].assert_called_once_with(
+        migration, temp / 'not-written', 'prepared processor', predict, current)
+    print('PASS: read-only preview, matching masks, scores, empty results, and labeling guards')
+
+
 def check_review(dataset, empty_image_id):
     import matplotlib
     matplotlib.use('Agg')
@@ -418,6 +532,26 @@ def check_yolo_reference_prompts(temp):
         assert np.allclose(item['box_xywh'], expected)
     assert len(sample(dataset, 3, 42, 1)) == 3
     json.dumps(references)
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    plot = labeling['plot_reference_images']
+    assert plot([]) is None
+    for selected in (references, references[:1],
+                     [{'image': references[0]['image'], 'box_xywh': references[0]['box_xywh']}]):
+        figure = plot(selected)
+        for index, (axis, item) in enumerate(zip(figure.axes, selected), 1):
+            assert len(axis.images) == 1 and len(axis.patches) == 1
+            assert np.asarray(axis.images[0].get_array()).shape == (80, 100, 3)
+            rectangle = axis.patches[0]
+            assert np.allclose((*rectangle.get_xy(), rectangle.get_width(), rectangle.get_height()),
+                               item['box_xywh'])
+            assert axis.get_title().startswith(f"{index}. {Path(item['image']).name}")
+            if 'line_number' in item:
+                assert f"label line {item['line_number']}" in axis.get_title()
+        for axis in figure.axes[len(selected):]:
+            assert not axis.images and not axis.patches and not axis.axison
+        plt.close(figure)
     for invalid in (0, -1, 1.5, True):
         must_raise(ValueError, sample, dataset, invalid, 42)
     must_raise(ValueError, sample, dataset, 7, 42)
@@ -481,6 +615,7 @@ def main():
         check_reference_prompt()
         check_yolo_reference_prompts(temp)
         migration = check_migration(temp)
+        check_preview(temp, migration)
         check_labels(temp, migration)
 
 

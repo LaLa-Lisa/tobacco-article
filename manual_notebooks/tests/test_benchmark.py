@@ -129,6 +129,44 @@ class BenchmarkTest(unittest.TestCase):
         with self.assertRaises(StopIteration):
             stream.read()
 
+    def test_producer_paces_with_sleep_and_absolute_deadlines(self):
+        image = np.zeros((2, 2, 3), dtype=np.uint8)
+        with patch.object(bm.threading, 'Thread'):
+            stream = bm.LatestFrameStream([image], 300)
+        clock = [0.0]
+        published = []
+
+        def sleep(duration):
+            self.assertGreater(duration, 0)
+            self.assertLessEqual(duration, 0.01)
+            clock[0] += duration
+
+        def publish(frame, generated_at):
+            self.assertIsNot(frame, image)
+            published.append(generated_at)
+            clock[0] += 0.0002
+            if len(published) == 3:
+                stream.stop.set()
+
+        with patch.object(bm.time, 'perf_counter', side_effect=lambda: clock[0]), \
+                patch.object(bm.time, 'sleep', side_effect=sleep), \
+                patch.object(stream, '_publish', side_effect=publish), \
+                patch.object(stream.stop, 'wait', side_effect=AssertionError('Coarse timer used')):
+            stream._produce()
+        self.assertIsNone(stream.error)
+        np.testing.assert_allclose(published, [0, 1 / 300, 2 / 300])
+
+    def test_producer_low_rate_checks_stop_between_short_sleeps(self):
+        image = np.zeros((2, 2, 3), dtype=np.uint8)
+        with patch.object(bm.threading, 'Thread'):
+            stream = bm.LatestFrameStream([image], 0.1)
+        with patch.object(bm.time, 'perf_counter', return_value=0), \
+                patch.object(bm.time, 'sleep', side_effect=lambda duration: stream.stop.set()) as sleep:
+            stream._produce()
+        self.assertIsNone(stream.error)
+        self.assertEqual(stream.generated, 1)
+        sleep.assert_called_once_with(0.01)
+
     def test_producer_error_propagates(self):
         image = Mock()
         image.copy.side_effect = ValueError('copy failed')

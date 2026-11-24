@@ -85,7 +85,11 @@ class LatestFrameStream:
         try:
             next_time = time.perf_counter()
             index = 0
-            while not self.stop.wait(max(0, next_time - time.perf_counter())):
+            while not self.stop.is_set():
+                remaining = next_time - time.perf_counter()
+                if remaining > 0:
+                    time.sleep(min(remaining, 0.01))
+                    continue
                 generated_at = time.perf_counter()
                 frame = self.images[index % len(self.images)].copy()
                 self._publish(frame, generated_at)
