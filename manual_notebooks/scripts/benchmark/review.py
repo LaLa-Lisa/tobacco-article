@@ -130,7 +130,7 @@ def _plot_column(axes, item, kind, bin_seconds):
         memory.text(.5, .5, 'No timing-window samples', transform=memory.transAxes, ha='center')
 
 
-def comparison_figures(measurements, *, kind='binned', bin_seconds=1.0):
+def comparison_figures(measurements, *, kind='binned', bin_seconds=1.0, zero_based_y=False):
     """Для каждой частоты потока сопоставить модели на одинаковых шкалах."""
     import matplotlib.pyplot as plt
 
@@ -151,7 +151,8 @@ def comparison_figures(measurements, *, kind='binned', bin_seconds=1.0):
             fps_label = f'FPS ({bin_seconds:g} s bins)' if kind == 'binned' else 'Instantaneous FPS'
             for row, label in zip(axes, [fps_label, 'Latency (ms)', 'Timing-window memory (MiB)']):
                 row[0].set_ylabel(label)
-                row[0].set_ylim(bottom=0)
+                if zero_based_y:
+                    row[0].set_ylim(bottom=0)
                 for ax in row:
                     ax.grid(alpha=.25)
             axes[0, 0].set_xlim(0, max(m.run.duration_s for m in (direct, stream) if m))

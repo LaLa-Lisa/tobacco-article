@@ -59,7 +59,7 @@ def plot_series(series, *, ax=None, kind='binned', bin_seconds=1.0):
     return ax
 
 
-def plot_fps_over_time(directory, bin_seconds=1.0, *, kind='binned'):
+def plot_fps_over_time(directory, bin_seconds=1.0, *, kind='binned', zero_based_y=False):
     """Отдельная фигура для модели/устройства, панели по режиму и входной частоте."""
     import matplotlib.pyplot as plt
     if kind == 'binned':
@@ -73,23 +73,24 @@ def plot_fps_over_time(directory, bin_seconds=1.0, *, kind='binned'):
         groups.setdefault((run.model_id, run.device), {}).setdefault(
             (run.mode, run.input_fps), []).append(run)
     for (model_id, device), modes in groups.items():
-        fig, axes = plt.subplots(len(modes), 1, figsize=(11, 3.5 * len(modes)), squeeze=False)
+        fig, axes = plt.subplots(len(modes), 1, figsize=(11, 3.5 * len(modes)), squeeze=False, sharey=True)
         for ax, ((mode, rate), measurements) in zip(axes[:, 0], modes.items()):
             for index, run in enumerate(measurements, 1):
                 series = run.fps(kind=kind, bin_seconds=bin_seconds)
                 draw_series(ax, series, label=series.label if len(measurements) == 1 else f"Run {index}")
             title = 'Direct inference' if mode == 'direct' else f'Synthetic stream — input {rate:g} FPS'
             ax.set(title=title, xlabel='Time since measurement start (s)', ylabel='FPS')
-            ax.set_ylim(bottom=0)
             ax.grid(alpha=0.25)
             ax.legend()
         mode_label = f'{bin_seconds:g} s bins' if kind == 'binned' else 'instantaneous'
         fig.suptitle(f'{model_id} / {device} — FPS over time ({mode_label})')
+        if zero_based_y:
+            axes[0, 0].set_ylim(bottom=0)
         fig.tight_layout()
         plt.show()
 
 
-def plot_latency_over_time(directory):
+def plot_latency_over_time(directory, *, zero_based_y=False):
     """Задержки каждого кадра по времени завершения; без фильтрации и усреднения."""
     import matplotlib.pyplot as plt
     runs = _measurement_runs(directory)
@@ -101,7 +102,7 @@ def plot_latency_over_time(directory):
         groups.setdefault((run.model_id, run.device), {}).setdefault(
             (run.mode, run.input_fps), []).append(run)
     for (model_id, device), modes in groups.items():
-        fig, axes = plt.subplots(len(modes), 1, figsize=(11, 3.5 * len(modes)), squeeze=False)
+        fig, axes = plt.subplots(len(modes), 1, figsize=(11, 3.5 * len(modes)), squeeze=False, sharey=True)
         for ax, ((mode, rate), measurements) in zip(axes[:, 0], modes.items()):
             for index, run in enumerate(measurements, 1):
                 prediction = run.latency()
@@ -116,10 +117,11 @@ def plot_latency_over_time(directory):
                             label="Frame incl. queue" if len(measurements) == 1 else f"Frame incl. queue — run {index}")
             title = 'Direct inference' if mode == 'direct' else f'Synthetic stream — input {rate:g} FPS'
             ax.set(title=title, xlabel='Time since measurement start (s)', ylabel='Latency (ms)')
-            ax.set_ylim(bottom=0)
             ax.grid(alpha=0.25)
             ax.legend()
         fig.suptitle(f'{model_id} / {device} — latency over time')
+        if zero_based_y:
+            axes[0, 0].set_ylim(bottom=0)
         fig.tight_layout()
         plt.show()
 
