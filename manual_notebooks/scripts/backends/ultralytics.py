@@ -147,6 +147,17 @@ class UltralyticsPredictor:
         self.semantic = None
         self.semantic_options = None
 
+    def _load_model(self):
+        if self.model is None:
+            self.model = _construct(self.spec, self.artifacts.checkpoint)
+
+    def footprint_module(self, *, prompts=None):
+        # Семантический SAM3 создаёт другую сеть при получении изображения.
+        if self.spec.checkpoint == 'sam3.pt' and {'text', 'exemplars'}.intersection(prompts or {}):
+            return None
+        self._load_model()
+        return self.model.model
+
     def benchmark_metadata(self):
         """Настройки загруженного SDK; imgsz не выдаётся за форму входного тензора."""
         predictor = self.semantic if self.semantic is not None else getattr(self.model, 'predictor', None)
@@ -219,8 +230,7 @@ class UltralyticsPredictor:
                 semantic_prompts["bboxes"] = semantic_prompts.pop("exemplars")
             results = self.semantic(**semantic_prompts)
         else:
-            if self.model is None:
-                self.model = _construct(self.spec, self.artifacts.checkpoint)
+            self._load_model()
             if constructor in {"YOLOWorld", "YOLOE"} and "text" in prompts:
                 texts = prompts.pop("text")
                 if constructor == "YOLOWorld":

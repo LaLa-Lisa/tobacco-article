@@ -18,6 +18,19 @@ from scripts.benchmark.progress import BenchmarkProgress
 
 
 class BenchmarkTest(unittest.TestCase):
+    def test_model_footprint_counts_shared_storage_once_in_loaded_dtype(self):
+        import torch
+        from scripts.benchmark.footprint import model_footprint
+
+        module = torch.nn.Module()
+        module.weight = torch.nn.Parameter(torch.ones(6, dtype=torch.float16))
+        module.tied = torch.nn.Parameter(module.weight[:2], requires_grad=False)
+        module.register_buffer('view', module.weight.detach()[1:])
+        module.register_buffer('counter', torch.zeros(2, dtype=torch.int64), persistent=False)
+        self.assertEqual(model_footprint(module), dict(
+            model_parameter_bytes=12, model_buffer_bytes=16, model_tensor_bytes=28,
+            model_bytes_by_dtype={'torch.float16': 12, 'torch.int64': 16}))
+
     def test_progress_counts_saved_runs_once_across_workers(self):
         bar = Mock(n=0)
         progress = BenchmarkProgress(4, bar_factory=Mock(return_value=bar))

@@ -47,6 +47,9 @@ class ReviewTest(unittest.TestCase):
         self.save(2, '0000-worker-r1', peak=9)
         self.save(2, '0001-worker-r2', peak=10)
         newest = self.save(2, '0001-worker-r2', 1, peak=11)
+        raw = json.loads(newest.read_text())
+        raw['summary']['model_tensor_bytes'] = 3 * 2**20
+        newest.write_text(json.dumps(raw))
         self.save(2, 'gpu', device='cuda:0', peak=8)
         bad = self.save(3, 'broken')
         bad.write_text('{')
@@ -60,6 +63,8 @@ class ReviewTest(unittest.TestCase):
         brief = simple_table(chosen)
         self.assertEqual(brief.columns.get_level_values(0).unique().tolist(),
                          ['Direct', 'Stream 5 FPS', 'Stream 30 FPS'])
+        self.assertEqual(brief.loc[('m', 'cpu'), ('Direct', 'Model tensors (MiB)')], 3)
+        self.assertTrue(pd.isna(brief.loc[('m', 'cuda:0'), ('Direct', 'Model tensors (MiB)')]))
         self.assertEqual(brief.loc[('m', 'cpu'), ('Direct', 'Peak RAM (MiB)')], 11)
         self.assertEqual(brief.loc[('m', 'cuda:0'), ('Direct', 'Peak GPU allocated (MiB)')], 1)
         self.assertTrue(pd.isna(brief.loc[('m', 'cpu'), ('Stream 5 FPS', 'Peak RAM (MiB)')]))

@@ -9,6 +9,7 @@ import time
 
 from .core import (BenchmarkConfig, DeviceMetrics, make_schedule, measure_run,
                         save_run, sha256, write_json)
+from .footprint import model_footprint
 
 
 def run_worker(request):
@@ -76,6 +77,10 @@ def run_worker(request):
     write_json(directory / 'manifest.json', manifest)
     try:
         predictor = load_model(spec.id, artifacts, device=metrics.device)
+        module = predictor.footprint_module(prompts=payload['prompts'])
+        footprint = model_footprint(module) if module is not None else {}
+        manifest['model_bytes_by_dtype'] = footprint.pop('model_bytes_by_dtype', None)
+        del module
         for index, rate in enumerate(manifest['schedule']):
             def report(stage, completed=index):
                 if payload.get('progress', False):
@@ -99,6 +104,7 @@ def run_worker(request):
                             cuda_matmul_allow_tf32=torch.backends.cuda.matmul.allow_tf32)
             run.update(model_id=spec.id, device=metrics.device)
             run['summary']['rss_baseline_bytes'] = manifest['rss_baseline_bytes']
+            run['summary'].update(footprint)
             save_run(directory, index, run)
             report('Saved', completed=index + 1)
             print(run['summary'], flush=True)

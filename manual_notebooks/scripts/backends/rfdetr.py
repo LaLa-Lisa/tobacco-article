@@ -145,6 +145,16 @@ class RFDETRPredictor:
         self.spec, self.artifacts, self.device = spec, artifacts, device
         self.model = None
 
+    def _load_model(self):
+        if self.model is None:
+            model = _provider().RFDETR.from_checkpoint(str(self.artifacts.checkpoint), device=self.device)
+            _check_model(self.spec, model)
+            self.model = model
+
+    def footprint_module(self, *, prompts=None):
+        self._load_model()
+        return self.model.model.model
+
     def benchmark_metadata(self):
         """Разрешение восстановлено из checkpoint; dtype не предполагается по умолчанию."""
         config = getattr(self.model, 'model_config', None)
@@ -170,10 +180,7 @@ class RFDETRPredictor:
             rgb = Image.fromarray(image[..., ::-1])
         else:
             raise TypeError('Use a local image path, PIL image or BGR numpy array')
-        if self.model is None:
-            model = _provider().RFDETR.from_checkpoint(str(self.artifacts.checkpoint), device=self.device)
-            _check_model(self.spec, model)
-            self.model = model
+        self._load_model()
         size = options.pop('imgsz', self.model.model_config.resolution)
         if size != self.model.model_config.resolution:
             raise ValueError(f'imgsz must match loaded resolution {self.model.model_config.resolution}')

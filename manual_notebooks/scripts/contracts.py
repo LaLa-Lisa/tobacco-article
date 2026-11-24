@@ -83,6 +83,8 @@ class Prediction:
 
 
 class Predictor(Protocol):
+    def footprint_module(self, *, prompts: dict | None = None) -> Any: ...
+
     def predict(self, image: Any, *, prompts: dict | None = None, **options) -> list[Prediction]: ...
 
 

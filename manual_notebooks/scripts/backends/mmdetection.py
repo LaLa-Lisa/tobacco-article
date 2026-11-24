@@ -162,6 +162,9 @@ class MMDetectionPredictor:
         pipeline = model.cfg.test_dataloader.dataset.pipeline
         self.scale = tuple(next(t.scale for t in pipeline if t.type == 'Resize'))
 
+    def footprint_module(self, *, prompts=None):
+        return self.model
+
     def benchmark_metadata(self):
         return dict(configured_input_size=list(self.scale), actual_tensor_shape=None)
 

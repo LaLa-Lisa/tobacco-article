@@ -77,7 +77,8 @@ def simple_table(measurements):
         row = rows.setdefault(item.model_device, {})
         label = item.mode_label
         metrics = {'FPS': item.summary['processing_fps']}
-        fields = {'Peak RAM (MiB)': 'probe_rss_sampled_peak_bytes'}
+        fields = {'Model tensors (MiB)': 'model_tensor_bytes',
+                  'Peak RAM (MiB)': 'probe_rss_sampled_peak_bytes'}
         if item.run.device.startswith('cuda'):
             fields['Peak GPU allocated (MiB)'] = 'probe_cuda_allocated_bytes_peak'
         for name, field in fields.items():
