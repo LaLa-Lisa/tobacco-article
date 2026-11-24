@@ -7,6 +7,7 @@ from pathlib import Path
 import warnings
 
 from .measurement import MeasurementRun
+from .plots import draw_series
 
 
 @dataclass
@@ -107,10 +108,9 @@ def full_table(measurements):
     return pd.DataFrame(rows)
 
 
-def _plot_column(axes, item):
+def _plot_column(axes, item, kind, bin_seconds):
     fps, latency, memory = axes
-    series = item.run.fps()
-    fps.stairs(series.values, series.bin_edges)
+    draw_series(fps, item.run.fps(kind=kind, bin_seconds=bin_seconds))
     for key, label, style in [('prediction_ms', 'Prediction', '-'),
                               ('frame_latency_ms', 'Frame incl. queue', '--')]:
         if key == 'frame_latency_ms' and item.run.mode == 'direct':
@@ -130,7 +130,7 @@ def _plot_column(axes, item):
         memory.text(.5, .5, 'No timing-window samples', transform=memory.transAxes, ha='center')
 
 
-def comparison_figures(measurements):
+def comparison_figures(measurements, *, kind='binned', bin_seconds=1.0):
     """Для каждой частоты потока сопоставить модели на одинаковых шкалах."""
     import matplotlib.pyplot as plt
 
@@ -146,9 +146,10 @@ def comparison_figures(measurements):
             for column, (name, item) in enumerate([('Direct', direct), ('Stream', stream)]):
                 axes[0, column].set_title(item.mode_label if item else f'{name} (unmeasured)')
                 if item:
-                    _plot_column(axes[:, column], item)
+                    _plot_column(axes[:, column], item, kind, bin_seconds)
                 axes[2, column].set_xlabel('Seconds since measurement start')
-            for row, label in zip(axes, ['Processing FPS', 'Latency (ms)', 'Timing-window memory (MiB)']):
+            fps_label = f'FPS ({bin_seconds:g} s bins)' if kind == 'binned' else 'Instantaneous FPS'
+            for row, label in zip(axes, [fps_label, 'Latency (ms)', 'Timing-window memory (MiB)']):
                 row[0].set_ylabel(label)
                 row[0].set_ylim(bottom=0)
                 for ax in row:

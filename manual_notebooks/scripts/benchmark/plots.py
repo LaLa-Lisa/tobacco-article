@@ -23,6 +23,14 @@ def _measurement_runs(source):
     return list(source)
 
 
+def draw_series(ax, value, *, label=None):
+    if value.bin_edges is None:
+        ax.plot(value.times, value.plot_values, marker='.', markersize=3,
+                linewidth=1, label=label)
+    else:
+        ax.stairs(value.plot_values, value.bin_edges, baseline=None, label=label)
+
+
 def plot_series(series, *, ax=None, kind='binned', bin_seconds=1.0):
     """Показать замеры или готовые ряды; вернуть Axes для дальнейшей настройки."""
     import matplotlib.pyplot as plt
@@ -39,11 +47,7 @@ def plot_series(series, *, ax=None, kind='binned', bin_seconds=1.0):
     if ax is None:
         _, ax = plt.subplots(figsize=(11, 4))
     for value in series:
-        if value.bin_edges is None:
-            ax.plot(value.times, value.plot_values, marker='.', markersize=3,
-                    linewidth=1, label=value.label)
-        else:
-            ax.stairs(value.plot_values, value.bin_edges, baseline=None, label=value.label)
+        draw_series(ax, value, label=value.label)
     ax.set(xlabel='Time since measurement start (s)', ylabel=next(iter(units), 'FPS'))
     ax.grid(alpha=0.25)
     if series:
@@ -55,10 +59,11 @@ def plot_series(series, *, ax=None, kind='binned', bin_seconds=1.0):
     return ax
 
 
-def plot_fps_over_time(directory, bin_seconds=1.0):
+def plot_fps_over_time(directory, bin_seconds=1.0, *, kind='binned'):
     """Отдельная фигура для модели/устройства, панели по режиму и входной частоте."""
     import matplotlib.pyplot as plt
-    positive(bin_seconds, 'bin_seconds')
+    if kind == 'binned':
+        positive(bin_seconds, 'bin_seconds')
     runs = _measurement_runs(directory)
     if not runs:
         print('No completed runs found')
@@ -71,14 +76,15 @@ def plot_fps_over_time(directory, bin_seconds=1.0):
         fig, axes = plt.subplots(len(modes), 1, figsize=(11, 3.5 * len(modes)), squeeze=False)
         for ax, ((mode, rate), measurements) in zip(axes[:, 0], modes.items()):
             for index, run in enumerate(measurements, 1):
-                edges, fps = completion_fps_bins(run, bin_seconds)
-                ax.stairs(fps, edges, baseline=None, label="Processing FPS" if len(measurements) == 1 else f"Run {index}")
+                series = run.fps(kind=kind, bin_seconds=bin_seconds)
+                draw_series(ax, series, label=series.label if len(measurements) == 1 else f"Run {index}")
             title = 'Direct inference' if mode == 'direct' else f'Synthetic stream — input {rate:g} FPS'
-            ax.set(title=title, xlabel='Time since measurement start (s)', ylabel='Processing FPS')
+            ax.set(title=title, xlabel='Time since measurement start (s)', ylabel='FPS')
             ax.set_ylim(bottom=0)
             ax.grid(alpha=0.25)
             ax.legend()
-        fig.suptitle(f'{model_id} / {device} — FPS over time ({bin_seconds:g} s bins)')
+        mode_label = f'{bin_seconds:g} s bins' if kind == 'binned' else 'instantaneous'
+        fig.suptitle(f'{model_id} / {device} — FPS over time ({mode_label})')
         fig.tight_layout()
         plt.show()
 
