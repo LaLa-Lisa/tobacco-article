@@ -1,0 +1,47 @@
+# Python 3.12. Git is required to install the pinned SAM 3 revision.
+# For NVIDIA GPU training on Windows, install the CUDA 12.8 builds first:
+# python -m pip install torch==2.10.0 torchvision==0.25.0 --index-url https://download.pytorch.org/whl/cu128
+
+# Jupyter and notebook validation
+ipykernel>=6.29,<8
+ipython>=8.18,<10
+jupyterlab>=4.3,<5
+nbclient>=0.10,<1
+nbformat>=5.10,<6
+
+# Data preparation, visualization, and benchmarking
+matplotlib>=3.8,<4
+numpy==1.26.4
+opencv-python==4.11.0.86
+# Roboflow requires the headless distribution. Keep both OpenCV versions aligned.
+opencv-python-headless==4.11.0.86
+pandas>=2.2,<3
+Pillow>=10,<14
+psutil>=5.9
+pycocotools>=2.0.10,<3
+pyyaml>=6
+scipy>=1.12,<2
+tqdm>=4.66
+
+# Model runtimes
+torch==2.10.0
+torchvision==0.25.0
+ultralytics==8.4.81
+rfdetr[train]==1.12.1
+# RF-DETR's Vernier evaluator needs PyArrow compatible with SAM 3's NumPy 1.26.
+pyarrow==23.0.1
+
+# SAM 3 training and inference
+sam3 @ git+https://github.com/facebookresearch/sam3.git@f1647e8d0c1d280991f4d1b7d974c2704537fe66
+einops>=0.8
+fairscale>=0.4.13
+fvcore>=0.1.5
+huggingface-hub>=0.28,<2
+hydra-core>=1.3,<1.4
+iopath>=0.1.10
+scikit-image>=0.23,<0.26
+scikit-learn>=1.5,<2
+setuptools>=70,<81
+torchmetrics>=1.6,<2
+triton-windows>=3.6,<3.7; sys_platform == 'win32'
+zstandard>=0.23
